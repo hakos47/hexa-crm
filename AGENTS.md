@@ -58,14 +58,40 @@ Al estabilizar sin parar `main`:
 main → branch release/X.Y → solo fixes → tag vX.Y.Z → merge back a main
 ```
 
-### Protección recomendada de `main` (GitHub)
+### Protección de `main` (local + GitHub)
 
-- PR obligatorio
-- Status checks: `test`, `build`
-- Sin force-push
-- Historial lineal / squash preferido
+**Hooks versionados** (en el repo):
+
+| Hook | Efecto |
+|------|--------|
+| `.githooks/pre-commit` | Bloquea **commits** si la rama actual es `main`/`master` |
+| `.githooks/pre-push` | Bloquea **push** a `refs/heads/main` o `master` |
+
+Activación (automática con `npm install` vía `prepare`, o manual):
+
+```bash
+npm run hooks:install
+# o: bash scripts/install-git-hooks.sh
+```
+
+Ejecuta `git config core.hooksPath .githooks`.
+
+Excepciones de emergencia:
+
+```bash
+ALLOW_MAIN_COMMIT=1 git commit ...
+ALLOW_MAIN_PUSH=1 git push origin main
+```
+
+**GitHub Branch protection** (Settings → Branches → regla para `main`) — el hook local no basta en el servidor:
+
+- Require a pull request before merging
+- Require status checks: `test`, `build` (cuando existan workflows)
+- Do not allow force pushes / deletions
+- Prefer squash merge / linear history
 
 ---
+
 
 ## Estructura de carpetas del proyecto
 
