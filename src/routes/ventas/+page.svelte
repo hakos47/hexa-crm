@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
   import type { Customer, Product, Sale, SaleLineInput } from "$lib/types";
-  import { formatEUR } from "$lib/money";
+  import { formatEUR, parseEurosInput } from "$lib/money";
   import { saleTotals, type LineInput } from "$lib/vat";
   import Button from "$lib/components/Button.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -17,7 +17,8 @@
   let customers = $state<Customer[]>([]);
   let sales = $state<Sale[]>([]);
   let tab = $state<"tpv" | "historial">("tpv");
-  let cart = $state<{ product: Product; qty: number }[]>([]);
+  type CartLine = { product: Product; qty: number; discount_cents: number };
+  let cart = $state<CartLine[]>([]);
   let customerId = $state<string>("");
   let notes = $state("");
   let productQuery = $state("");
@@ -40,10 +41,17 @@
       qty: c.qty,
       unitPriceCents: c.product.price_cents,
       vatRate: c.product.vat_rate,
+      discountCents: Math.min(c.discount_cents, c.product.price_cents * c.qty),
     }))
   );
 
   const totals = $derived(saleTotals(cartLines));
+  const totalDiscountCents = $derived(
+    cart.reduce(
+      (acc, c) => acc + Math.min(c.discount_cents, c.product.price_cents * c.qty),
+      0
+    )
+  );
 
   async function load() {
     loading = true;
@@ -73,7 +81,7 @@
         c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c
       );
     } else {
-      cart = [...cart, { product: p, qty: 1 }];
+      cart = [...cart, { product: p, qty: 1, discount_cents: 0 }];
     }
   }
 
@@ -111,17 +119,44 @@
     }
     cart = cart.map((c) => {
       if (c.product.id !== id) return c;
-      return { ...c, qty: Math.min(qty, c.product.stock) };
+      const nextQty = Math.min(qty, c.product.stock);
+      const maxDisc = c.product.price_cents * nextQty;
+      return {
+        ...c,
+        qty: nextQty,
+        discount_cents: Math.min(c.discount_cents, maxDisc),
+      };
     });
+  }
+
+  function setLineDiscountEuros(id: number, raw: string) {
+    const cents = parseEurosInput(raw);
+    cart = cart.map((c) => {
+      if (c.product.id !== id) return c;
+      const max = c.product.price_cents * c.qty;
+      const disc = cents == null || cents < 0 ? 0 : Math.min(cents, max);
+      return { ...c, discount_cents: disc };
+    });
+  }
+
+  function lineNetCents(c: CartLine): number {
+    return Math.max(0, c.product.price_cents * c.qty - c.discount_cents);
   }
 
   async function checkout() {
     if (!cart.length || submitting) return;
+    for (const c of cart) {
+      if (c.discount_cents > c.product.price_cents * c.qty) {
+        showToast(`Descuento inválido en ${c.product.name}`, "err");
+        return;
+      }
+    }
     submitting = true;
     try {
       const lines: SaleLineInput[] = cart.map((c) => ({
         product_id: c.product.id,
         qty: c.qty,
+        discount_cents: c.discount_cents > 0 ? c.discount_cents : undefined,
       }));
       const sale = await api.createSale(
         lines,
@@ -202,26 +237,44 @@
       {#if cart.length === 0}
         <EmptyState title="Carrito vacío" description="Pulsa un producto para añadirlo." />
       {:else}
-        <ul class="mb-3 max-h-52 space-y-2 overflow-y-auto">
+        <ul class="mb-3 max-h-56 space-y-2 overflow-y-auto">
           {#each cart as c}
-            <li class="flex flex-wrap items-center gap-2 rounded-xl bg-black/20 px-3 py-2 text-sm">
-              <div class="min-w-0 flex-1 basis-[min(100%,10rem)]">
-                <p class="truncate font-medium">{c.product.name}</p>
-                <p class="text-xs tabular text-[var(--color-muted-dim)]">
-                  {formatEUR(c.product.price_cents)} · IVA {c.product.vat_rate}%
-                </p>
+            <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="min-w-0 flex-1 basis-[min(100%,10rem)]">
+                  <p class="truncate font-medium">{c.product.name}</p>
+                  <p class="text-xs tabular text-[var(--color-muted-dim)]">
+                    {formatEUR(c.product.price_cents)} · IVA {c.product.vat_rate}%
+                  </p>
+                </div>
+                <label class="flex flex-col gap-0.5 text-[10px] text-[var(--color-muted-dim)]">
+                  Uds
+                  <input
+                    type="number"
+                    min="1"
+                    max={c.product.stock}
+                    value={c.qty}
+                    class="field w-14 shrink-0 px-2 py-1 text-center text-sm tabular"
+                    oninput={(e) => setQty(c.product.id, Number((e.target as HTMLInputElement).value))}
+                  />
+                </label>
+                <label class="flex flex-col gap-0.5 text-[10px] text-[var(--color-muted-dim)]">
+                  Dto. €
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    placeholder="0"
+                    value={c.discount_cents ? (c.discount_cents / 100).toFixed(2) : ""}
+                    class="field w-16 shrink-0 px-2 py-1 text-center text-sm tabular"
+                    onchange={(e) =>
+                      setLineDiscountEuros(c.product.id, (e.target as HTMLInputElement).value)}
+                    title="Descuento en euros sobre la línea (máx. total línea)"
+                  />
+                </label>
+                <span class="w-20 shrink-0 text-right tabular text-[var(--color-text)]">
+                  {formatEUR(lineNetCents(c))}
+                </span>
               </div>
-              <input
-                type="number"
-                min="1"
-                max={c.product.stock}
-                value={c.qty}
-                class="field w-14 shrink-0 px-2 py-1 text-center tabular"
-                oninput={(e) => setQty(c.product.id, Number((e.target as HTMLInputElement).value))}
-              />
-              <span class="w-20 shrink-0 text-right tabular text-[var(--color-text)]">
-                {formatEUR(c.product.price_cents * c.qty)}
-              </span>
             </li>
           {/each}
         </ul>
@@ -238,6 +291,12 @@
         />
 
         <div class="mb-3 space-y-1 rounded-xl border border-[var(--color-border)] bg-black/30 p-3 text-sm">
+          {#if totalDiscountCents > 0}
+            <div class="flex justify-between gap-2 text-amber-200/90">
+              <span>Descuentos</span>
+              <span class="tabular">−{formatEUR(totalDiscountCents)}</span>
+            </div>
+          {/if}
           <div class="flex justify-between gap-2 text-[var(--color-muted)]">
             <span>Base imponible</span>
             <span class="tabular">{formatEUR(totals.subtotalCents)}</span>

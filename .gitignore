@@ -11,3 +11,6 @@ src-tauri/target
 dist
 *.db
 .DS_Store
+
+# Keep continuous-improvement memory tracked under .grok/
+# (do not ignore .grok/continuous-improvement)
