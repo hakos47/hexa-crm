@@ -4,20 +4,23 @@ use crate::models::{Product, ProductInput};
 use rusqlite::params;
 use tauri::State;
 
+const PRODUCT_COLS: &str = "id, sku, name, description, COALESCE(category,''), stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at";
+
 fn map_product(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
     Ok(Product {
         id: row.get(0)?,
         sku: row.get(1)?,
         name: row.get(2)?,
         description: row.get(3)?,
-        stock: row.get(4)?,
-        min_stock: row.get(5)?,
-        cost_cents: row.get(6)?,
-        price_cents: row.get(7)?,
-        vat_rate: row.get(8)?,
-        active: row.get::<_, i64>(9)? == 1,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        category: row.get(4)?,
+        stock: row.get(5)?,
+        min_stock: row.get(6)?,
+        cost_cents: row.get(7)?,
+        price_cents: row.get(8)?,
+        vat_rate: row.get(9)?,
+        active: row.get::<_, i64>(10)? == 1,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -31,13 +34,13 @@ pub fn list_products(
     require_session(&conn, &token)?;
     let only = active_only.unwrap_or(true);
     let sql = if only {
-        "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at
-         FROM products WHERE active = 1 ORDER BY name COLLATE NOCASE"
+        format!(
+            "SELECT {PRODUCT_COLS} FROM products WHERE active = 1 ORDER BY name COLLATE NOCASE"
+        )
     } else {
-        "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at
-         FROM products ORDER BY name COLLATE NOCASE"
+        format!("SELECT {PRODUCT_COLS} FROM products ORDER BY name COLLATE NOCASE")
     };
-    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], map_product)
         .map_err(|e| e.to_string())?
@@ -59,16 +62,18 @@ pub fn upsert_product(
     require_session(&conn, &token)?;
     let now = now_iso();
     let desc = input.description.unwrap_or_default();
+    let category = input.category.unwrap_or_default();
     let active = input.active.unwrap_or(true) as i64;
 
     if let Some(id) = input.id {
         conn.execute(
-            "UPDATE products SET sku=?1, name=?2, description=?3, stock=COALESCE(?4, stock), min_stock=COALESCE(?5, min_stock),
-             cost_cents=?6, price_cents=?7, vat_rate=?8, active=?9, updated_at=?10 WHERE id=?11",
+            "UPDATE products SET sku=?1, name=?2, description=?3, category=?4, stock=COALESCE(?5, stock), min_stock=COALESCE(?6, min_stock),
+             cost_cents=?7, price_cents=?8, vat_rate=?9, active=?10, updated_at=?11 WHERE id=?12",
             params![
                 input.sku,
                 input.name,
                 desc,
+                category,
                 input.stock,
                 input.min_stock,
                 input.cost_cents,
@@ -81,19 +86,20 @@ pub fn upsert_product(
         )
         .map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at FROM products WHERE id=?1",
+            &format!("SELECT {PRODUCT_COLS} FROM products WHERE id=?1"),
             params![id],
             map_product,
         )
         .map_err(|e| e.to_string())
     } else {
         conn.execute(
-            "INSERT INTO products (sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
+            "INSERT INTO products (sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11)",
             params![
                 input.sku,
                 input.name,
                 desc,
+                category,
                 input.stock.unwrap_or(0),
                 input.min_stock.unwrap_or(0),
                 input.cost_cents,
@@ -106,7 +112,7 @@ pub fn upsert_product(
         .map_err(|e| e.to_string())?;
         let id = conn.last_insert_rowid();
         conn.query_row(
-            "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at FROM products WHERE id=?1",
+            &format!("SELECT {PRODUCT_COLS} FROM products WHERE id=?1"),
             params![id],
             map_product,
         )
@@ -139,7 +145,7 @@ pub fn adjust_stock(
     tx.commit().map_err(|e| e.to_string())?;
 
     conn.query_row(
-        "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at FROM products WHERE id=?1",
+        &format!("SELECT {PRODUCT_COLS} FROM products WHERE id=?1"),
         params![product_id],
         map_product,
     )

@@ -15,6 +15,7 @@
 
   let products = $state<Product[]>([]);
   let query = $state("");
+  let categoryFilter = $state("");
   let loading = $state(true);
   let modalOpen = $state(false);
   let stockModal = $state(false);
@@ -27,6 +28,7 @@
     sku: "",
     name: "",
     description: "",
+    category: "",
     stock: "0",
     min_stock: "5",
     cost: "",
@@ -34,12 +36,23 @@
     vat_rate: "21" as string,
   });
 
-  const filtered = $derived(
-    products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(query.toLowerCase()) ||
-        p.sku.toLowerCase().includes(query.toLowerCase())
+  const categories = $derived(
+    [...new Set(products.map((p) => p.category).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "es")
     )
+  );
+
+  const filtered = $derived(
+    products.filter((p) => {
+      const q = query.toLowerCase();
+      const matchQ =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.category || "").toLowerCase().includes(q);
+      const matchCat = !categoryFilter || p.category === categoryFilter;
+      return matchQ && matchCat;
+    })
   );
 
   async function load() {
@@ -61,6 +74,7 @@
       sku: "",
       name: "",
       description: "",
+      category: "",
       stock: "0",
       min_stock: "5",
       cost: "",
@@ -76,6 +90,7 @@
       sku: p.sku,
       name: p.name,
       description: p.description,
+      category: p.category || "",
       stock: String(p.stock),
       min_stock: String(p.min_stock),
       cost: (p.cost_cents / 100).toFixed(2),
@@ -97,6 +112,7 @@
       sku: form.sku.trim(),
       name: form.name.trim(),
       description: form.description,
+      category: form.category.trim(),
       stock: Number(form.stock) || 0,
       min_stock: Number(form.min_stock) || 0,
       cost_cents: cost,
@@ -139,13 +155,22 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+<div class="mb-4 flex flex-wrap items-center gap-3">
   <input
     bind:value={query}
-    placeholder="Buscar por nombre o SKU…"
-    class="w-full max-w-sm rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-emerald-400/40"
+    placeholder="Buscar nombre, SKU o categoría…"
+    class="field w-full max-w-sm text-sm"
   />
-  <Button onclick={openCreate}>+ Nuevo producto</Button>
+  <Select
+    class="w-full max-w-[12rem]"
+    bind:value={categoryFilter}
+    placeholder="Todas las categorías"
+    options={[
+      { value: "", label: "Todas las categorías" },
+      ...categories.map((c) => ({ value: c, label: c })),
+    ]}
+  />
+  <Button class="ml-auto" onclick={openCreate}>+ Nuevo producto</Button>
 </div>
 
 {#if loading}
@@ -161,6 +186,7 @@
         <thead class="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
           <tr>
             <th class="px-4 py-3 font-medium">Producto</th>
+            <th class="px-4 py-3 font-medium">Categoría</th>
             <th class="px-4 py-3 font-medium">Stock</th>
             <th class="px-4 py-3 font-medium">PVP</th>
             <th class="px-4 py-3 font-medium">IVA</th>
@@ -174,6 +200,9 @@
               <td class="px-4 py-3">
                 <p class="font-medium text-slate-100">{p.name}</p>
                 <p class="text-xs text-slate-500">{p.sku}</p>
+              </td>
+              <td class="px-4 py-3 text-sm text-[var(--color-muted)]">
+                {p.category || "—"}
               </td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
@@ -225,6 +254,7 @@
       />
     </div>
     <Input label="Nombre" bind:value={form.name} required />
+    <Input label="Categoría" bind:value={form.category} placeholder="Alimentación, Tecnología…" />
     <Input label="Descripción" bind:value={form.description} />
     <div class="grid gap-3 sm:grid-cols-2">
       <Input label="PVP (€, IVA incl.)" bind:value={form.price} required />

@@ -5,6 +5,7 @@ export type Product = {
   sku: string;
   name: string;
   description: string;
+  category: string;
   stock: number;
   min_stock: number;
   cost_cents: number;
@@ -20,6 +21,7 @@ export type ProductInput = {
   sku: string;
   name: string;
   description?: string;
+  category?: string;
   stock?: number;
   min_stock?: number;
   cost_cents: number;

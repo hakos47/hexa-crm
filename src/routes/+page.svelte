@@ -79,19 +79,22 @@
       {:else}
         <ul class="space-y-2">
           {#each stats.low_stock as p}
-            <li
-              class="rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-2.5 transition hover:border-purple-400/25"
-            >
-              <div class="flex items-center justify-between gap-2">
+            <li>
+              <a
+                href="/inventario"
+                class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-2.5 transition hover:border-purple-400/25 hover:bg-purple-500/10"
+              >
                 <div class="min-w-0">
                   <p class="truncate text-sm font-medium text-[var(--color-text)]">{p.name}</p>
-                  <p class="text-[11px] text-[var(--color-muted-dim)]">{p.sku}</p>
+                  <p class="text-[11px] text-[var(--color-muted-dim)]">
+                    {p.sku}{p.category ? ` · ${p.category}` : ""}
+                  </p>
                 </div>
                 <div class="text-right">
                   <p class="tabular text-sm text-rose-300">{p.stock}</p>
                   <p class="text-[10px] text-[var(--color-muted-dim)]">mín {p.min_stock}</p>
                 </div>
-              </div>
+              </a>
             </li>
           {/each}
         </ul>

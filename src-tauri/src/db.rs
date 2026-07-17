@@ -25,6 +25,7 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             sku TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
             stock INTEGER NOT NULL DEFAULT 0,
             min_stock INTEGER NOT NULL DEFAULT 0,
             cost_cents INTEGER NOT NULL DEFAULT 0,
@@ -121,6 +122,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     );
     let _ = conn.execute("ALTER TABLE users ADD COLUMN temp_password_issued_at TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''",
+        [],
+    );
 
     seed_users_if_empty(conn)?;
     Ok(())
@@ -233,6 +238,7 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
             "CAF-001",
             "Café de especialidad 250g",
             "Tueste medio, origen Colombia",
+            "Alimentación",
             40,
             10,
             450,
@@ -243,6 +249,7 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
             "LIB-021",
             "Libro de cocina mediterránea",
             "Edición tapa blanda",
+            "Libros",
             12,
             5,
             900,
@@ -253,6 +260,7 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
             "TEC-110",
             "Auriculares Bluetooth",
             "Cancelación de ruido",
+            "Tecnología",
             8,
             4,
             2500,
@@ -263,6 +271,7 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
             "ALI-050",
             "Miel artesanal 500g",
             "Producción local",
+            "Alimentación",
             3,
             6,
             350,
@@ -273,9 +282,9 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
 
     for p in products {
         conn.execute(
-            "INSERT INTO products (sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?9)",
-            params![p.0, p.1, p.2, p.3, p.4, p.5, p.6, p.7, now],
+            "INSERT INTO products (sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10,?10)",
+            params![p.0, p.1, p.2, p.3, p.4, p.5, p.6, p.7, p.8, now],
         )
         .map_err(|e| e.to_string())?;
     }

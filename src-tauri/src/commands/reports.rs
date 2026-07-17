@@ -87,7 +87,7 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, sku, name, description, stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at
+            "SELECT id, sku, name, description, COALESCE(category,''), stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at
              FROM products WHERE active=1 AND stock <= min_stock ORDER BY stock ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -98,14 +98,15 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
                 sku: row.get(1)?,
                 name: row.get(2)?,
                 description: row.get(3)?,
-                stock: row.get(4)?,
-                min_stock: row.get(5)?,
-                cost_cents: row.get(6)?,
-                price_cents: row.get(7)?,
-                vat_rate: row.get(8)?,
-                active: row.get::<_, i64>(9)? == 1,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                category: row.get(4)?,
+                stock: row.get(5)?,
+                min_stock: row.get(6)?,
+                cost_cents: row.get(7)?,
+                price_cents: row.get(8)?,
+                vat_rate: row.get(9)?,
+                active: row.get::<_, i64>(10)? == 1,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?

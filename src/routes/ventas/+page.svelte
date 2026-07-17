@@ -10,6 +10,8 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { resolveQuickAdd } from "$lib/pos/quick-add";
+  import { downloadCsv, salesToCsv } from "$lib/export/csv";
 
   let products = $state<Product[]>([]);
   let customers = $state<Customer[]>([]);
@@ -75,6 +77,33 @@
     }
   }
 
+  /** POS barcode-style: Enter on search adds by SKU or sole match. */
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const r = resolveQuickAdd(productQuery, products);
+    if (r.kind === "exact_sku" || r.kind === "sole_match") {
+      addToCart(r.product as Product);
+      productQuery = "";
+      showToast(`Añadido: ${r.product.name}`);
+    } else if (r.kind === "ambiguous") {
+      showToast(`Hay ${r.count} coincidencias — afina el SKU`, "info");
+    } else {
+      showToast("Producto no encontrado o sin stock", "err");
+    }
+  }
+
+  function exportSalesCsv() {
+    if (!sales.length) {
+      showToast("No hay ventas para exportar", "info");
+      return;
+    }
+    const csv = salesToCsv(sales);
+    const day = new Date().toISOString().slice(0, 10);
+    downloadCsv(`ventas-${day}.csv`, csv);
+    showToast("CSV de ventas descargado");
+  }
+
   function setQty(id: number, qty: number) {
     if (qty <= 0) {
       cart = cart.filter((c) => c.product.id !== id);
@@ -121,13 +150,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap gap-2">
+<div class="mb-4 flex flex-wrap items-center gap-2">
   <Button variant={tab === "tpv" ? "primary" : "secondary"} onclick={() => (tab = "tpv")}>
     TPV
   </Button>
   <Button variant={tab === "historial" ? "primary" : "secondary"} onclick={() => (tab = "historial")}>
     Historial
   </Button>
+  {#if tab === "historial"}
+    <Button variant="secondary" class="ml-auto" onclick={exportSalesCsv}>Exportar CSV</Button>
+  {/if}
 </div>
 
 {#if loading}
@@ -137,9 +169,13 @@
     <Card class="min-w-0 xl:col-span-3" lift={false}>
       <input
         bind:value={productQuery}
-        placeholder="Buscar producto…"
-        class="field mb-3 w-full text-sm"
+        placeholder="Buscar o escanear SKU… (Enter)"
+        class="field mb-1 w-full text-sm"
+        onkeydown={onSearchKeydown}
       />
+      <p class="mb-3 text-[11px] text-[var(--color-muted-dim)]">
+        Enter = añadir por SKU exacto o única coincidencia (estilo pistola código de barras).
+      </p>
       <div class="grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
         {#each filteredProducts as p}
           <button

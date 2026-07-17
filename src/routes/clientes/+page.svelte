@@ -10,8 +10,22 @@
   import { showToast } from "$lib/stores/ui";
 
   let customers = $state<Customer[]>([]);
+  let query = $state("");
   let loading = $state(true);
   let open = $state(false);
+
+  const filtered = $derived(
+    customers.filter((c) => {
+      const q = query.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        c.name.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        c.nif.toLowerCase().includes(q)
+      );
+    })
+  );
   let editing = $state<Customer | null>(null);
   let form = $state({ name: "", email: "", phone: "", nif: "", notes: "" });
 
@@ -65,8 +79,13 @@
   }
 </script>
 
-<div class="mb-4 flex justify-end">
-  <Button onclick={openCreate}>+ Nuevo cliente</Button>
+<div class="mb-4 flex flex-wrap items-center gap-3">
+  <input
+    bind:value={query}
+    placeholder="Buscar nombre, email, teléfono o NIF…"
+    class="field w-full max-w-sm text-sm"
+  />
+  <Button class="ml-auto" onclick={openCreate}>+ Nuevo cliente</Button>
 </div>
 
 {#if loading}
@@ -75,9 +94,11 @@
   <EmptyState title="Sin clientes" description="Añade clientes para asociarlos a las ventas.">
     <Button onclick={openCreate}>Crear cliente</Button>
   </EmptyState>
+{:else if filtered.length === 0}
+  <EmptyState title="Sin resultados" description="Prueba otro término de búsqueda." />
 {:else}
   <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-    {#each customers as c}
+    {#each filtered as c}
       <Card>
         <div class="flex items-start justify-between gap-2">
           <div>

@@ -10,6 +10,8 @@
   let loading = $state(false);
   let shopName = $state("Nix-C");
 
+  let userInputEl: HTMLInputElement | undefined = $state();
+
   $effect(() => {
     api
       .publicMeta()
@@ -17,6 +19,11 @@
         shopName = s.shop_name || "Nix-C";
       })
       .catch(() => {});
+  });
+
+  $effect(() => {
+    // Focus username on open for faster login
+    queueMicrotask(() => userInputEl?.focus());
   });
 
   async function submit(e: Event) {
@@ -64,6 +71,7 @@
       <label class="grid gap-1.5 text-sm">
         <span class="font-medium text-[var(--color-muted)]">Usuario</span>
         <input
+          bind:this={userInputEl}
           bind:value={username}
           autocomplete="username"
           class="field w-full"

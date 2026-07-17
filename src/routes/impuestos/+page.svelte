@@ -7,7 +7,9 @@
   import Card from "$lib/components/Card.svelte";
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Badge from "$lib/components/Badge.svelte";
+  import Button from "$lib/components/Button.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { downloadCsv, vatSummaryToCsv } from "$lib/export/csv";
 
   function monthRange(d = new Date()) {
     const y = d.getFullYear();
@@ -34,6 +36,16 @@
   }
 
   onMount(load);
+
+  function exportCsv() {
+    if (!summary) {
+      showToast("No hay datos de IVA", "info");
+      return;
+    }
+    const csv = vatSummaryToCsv(summary.from, summary.to, summary.buckets);
+    downloadCsv(`libro-iva-${summary.from}_${summary.to}.csv`, csv);
+    showToast("Libro IVA exportado a CSV");
+  }
 </script>
 
 <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -51,6 +63,7 @@
   >
     Actualizar
   </button>
+  <Button variant="secondary" class="w-full sm:w-auto" onclick={exportCsv}>Exportar CSV</Button>
 </div>
 
 <div class="mb-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">

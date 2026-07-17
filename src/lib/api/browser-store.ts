@@ -33,7 +33,7 @@ import {
   validatePermanentPassword,
 } from "../auth/password-policy";
 
-const KEY = "nix-c-store-v3";
+const KEY = "nix-c-store-v4";
 
 /** In-memory fallback when localStorage is unavailable (tests / SSR). */
 let memoryStore: Store | null = null;
@@ -115,6 +115,7 @@ function seed(): Store {
       sku: "CAF-001",
       name: "Café de especialidad 250g",
       description: "Tueste medio, origen Colombia",
+      category: "Alimentación",
       stock: 40,
       min_stock: 10,
       cost_cents: 450,
@@ -129,6 +130,7 @@ function seed(): Store {
       sku: "LIB-021",
       name: "Libro de cocina mediterránea",
       description: "Edición tapa blanda",
+      category: "Libros",
       stock: 12,
       min_stock: 5,
       cost_cents: 900,
@@ -143,6 +145,7 @@ function seed(): Store {
       sku: "TEC-110",
       name: "Auriculares Bluetooth",
       description: "Cancelación de ruido",
+      category: "Tecnología",
       stock: 8,
       min_stock: 4,
       cost_cents: 2500,
@@ -157,6 +160,7 @@ function seed(): Store {
       sku: "ALI-050",
       name: "Miel artesanal 500g",
       description: "Producción local",
+      category: "Alimentación",
       stock: 3,
       min_stock: 6,
       cost_cents: 350,
@@ -208,6 +212,7 @@ function load(): Store {
   }
   const raw =
     localStorage.getItem(KEY) ??
+    localStorage.getItem("nix-c-store-v3") ??
     localStorage.getItem("nix-c-store-v2") ??
     localStorage.getItem("nix-c-store-v1");
   if (!raw) {
@@ -219,6 +224,12 @@ function load(): Store {
     const parsed = JSON.parse(raw) as Store;
     if (!parsed.users) parsed.users = [];
     else parsed.users = parsed.users.map(normalizeUser);
+    if (parsed.products) {
+      parsed.products = parsed.products.map((pr: any) => ({
+        ...pr,
+        category: pr.category ?? "",
+      }));
+    }
     if (!parsed.sessions) parsed.sessions = {};
     if (!parsed.seq) {
       parsed.seq = { product: 0, customer: 0, sale: 0, line: 0, cash: 0, stock: 0, user: 0 };
@@ -245,6 +256,7 @@ export function __resetBrowserStoreForTests() {
   memoryStore = null;
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(KEY);
+    localStorage.removeItem("nix-c-store-v3");
     localStorage.removeItem("nix-c-store-v2");
     localStorage.removeItem("nix-c-store-v1");
   }
@@ -544,6 +556,7 @@ export const browserApi = {
         sku: input.sku,
         name: input.name,
         description: input.description ?? "",
+        category: input.category ?? prev.category ?? "",
         stock: input.stock ?? prev.stock,
         min_stock: input.min_stock ?? prev.min_stock,
         cost_cents: input.cost_cents,
@@ -562,6 +575,7 @@ export const browserApi = {
       sku: input.sku,
       name: input.name,
       description: input.description ?? "",
+      category: input.category ?? "",
       stock: input.stock ?? 0,
       min_stock: input.min_stock ?? 0,
       cost_cents: input.cost_cents,
