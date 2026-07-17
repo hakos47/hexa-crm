@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Block direct commits on main. Use a feature branch + PR instead.
+# Emergency: ALLOW_MAIN_COMMIT=1 git commit ...
+
+set -euo pipefail
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+
+if [[ -z "$branch" ]]; then
+  # Detached HEAD (e.g. rebase) — allow
+  exit 0
+fi
+
+if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+  if [[ "${ALLOW_MAIN_COMMIT:-}" == "1" ]]; then
+    echo "⚠ ALLOW_MAIN_COMMIT=1 — commit en $branch permitido (excepción)."
+    exit 0
+  fi
+  cat <<'EOF' >&2
+
+✖ Commit directo en 'main' bloqueado.
+
+  Flujo del proyecto (ver AGENTS.md):
+    git checkout -b feat/mi-cambio
+    # ... edita y commit ...
+    git push -u origin HEAD
+    # abre PR → main
+
+  Emergencia (solo casos excepcionales):
+    ALLOW_MAIN_COMMIT=1 git commit ...
+
+EOF
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Block direct pushes to origin/main (and master).
+# Emergency: ALLOW_MAIN_PUSH=1 git push ...
+
+set -euo pipefail
+
+remote="${1:-}"
+url="${2:-}"
+
+protected_ref_push=0
+
+# stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      protected_ref_push=1
+      ;;
+  esac
+done
+
+if [[ "$protected_ref_push" -eq 1 ]]; then
+  if [[ "${ALLOW_MAIN_PUSH:-}" == "1" ]]; then
+    echo "⚠ ALLOW_MAIN_PUSH=1 — push a main permitido (excepción)."
+    exit 0
+  fi
+  cat <<'EOF' >&2
+
+✖ Push directo a 'main' bloqueado.
+
+  Usa una rama de trabajo y abre un Pull Request:
+    git push -u origin HEAD
+    gh pr create --base main
+
+  Emergencia:
+    ALLOW_MAIN_PUSH=1 git push origin main
+
+  En GitHub, activa también Branch protection en main
+  (Settings → Branches) para que el servidor también lo exija.
+
+EOF
+  exit 1
+fi
+
+exit 0
