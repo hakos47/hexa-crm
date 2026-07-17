@@ -13,9 +13,19 @@ Modelo: **trunk-based + canales por tags/CI** (no ramas eternas tipo nightly/pro
 
 | Rama | Rol |
 |------|-----|
-| **`main`** | Única rama estable de integración. Siempre CI verde. Fuente de nightlies y de releases. |
+| **`main`** | Producción / release. Solo avanza cuando el **humano** decide mergear desde `dev` (o un release). Protegida: no commits/push directos. |
+| **`dev`** | Integración del equipo de desarrollo (director de dev). Aquí aterrizan los `feat/*` ya testeados. Listo para review humana → `main`. |
 
-**No crear** por defecto: `develop`, `nightly`, `staging`, `prod` como ramas permanentes.
+**No crear** por defecto: `nightly`, `staging`, `prod` como ramas eternas adicionales.
+
+### Flujo de entrega (director de dev → humano)
+
+```
+feat/*  →  PR/merge a dev  →  tests+build verdes  →  [humano] decide merge dev → main
+```
+
+El director de dev puede mergear a **`dev`** y pushear `origin/dev`.  
+**No** mergear a `main` sin autorización explícita del responsable del producto.
 
 ### Corta vida (siempre desde `main`)
 
