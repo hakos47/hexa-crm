@@ -183,6 +183,29 @@
       showToast(e instanceof Error ? e.message : "Error", "err");
     }
   }
+
+  let cancelling = $state(false);
+
+  async function cancelSelected() {
+    if (!selectedSale || selectedSale.status !== "completed") return;
+    if (
+      !confirm(
+        `¿Anular el ticket ${selectedSale.number}? Se restaurará el stock y se registrará un gasto de caja por ${formatEUR(selectedSale.total_cents)}.`
+      )
+    ) {
+      return;
+    }
+    cancelling = true;
+    try {
+      selectedSale = await api.cancelSale(selectedSale.id);
+      showToast(`Ticket ${selectedSale.number} anulado`);
+      await load();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Error al anular", "err");
+    } finally {
+      cancelling = false;
+    }
+  }
 </script>
 
 <div class="mb-4 flex flex-wrap items-center gap-2">
@@ -340,11 +363,22 @@
             <tbody>
               {#each sales as s}
                 <tr class="border-b border-white/5 hover:bg-purple-500/[0.05]">
-                  <td class="px-3 py-3 font-medium sm:px-4">{s.number}</td>
+                  <td class="px-3 py-3 font-medium sm:px-4">
+                    {s.number}
+                    {#if s.status === "cancelled"}
+                      <Badge tone="danger">anulada</Badge>
+                    {/if}
+                  </td>
                   <td class="px-3 py-3 text-[var(--color-muted)] sm:px-4">
                     {new Date(s.sold_at).toLocaleString("es-ES")}
                   </td>
-                  <td class="px-3 py-3 tabular text-radiant sm:px-4">{formatEUR(s.total_cents)}</td>
+                  <td
+                    class="px-3 py-3 tabular sm:px-4 {s.status === 'cancelled'
+                      ? 'text-[var(--color-muted-dim)] line-through'
+                      : 'text-radiant'}"
+                  >
+                    {formatEUR(s.total_cents)}
+                  </td>
                   <td class="px-3 py-3 text-right sm:px-4">
                     <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openSale(s.id)}>
                       Ver
@@ -364,10 +398,29 @@
           Selecciona un ticket para ver el desglose de IVA.
         </p>
       {:else}
-        <h2 class="font-semibold">{selectedSale.number}</h2>
-        <p class="text-xs text-[var(--color-muted-dim)]">
-          {new Date(selectedSale.sold_at).toLocaleString("es-ES")}
-        </p>
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 class="font-semibold">
+              {selectedSale.number}
+              {#if selectedSale.status === "cancelled"}
+                <Badge tone="danger">anulada</Badge>
+              {/if}
+            </h2>
+            <p class="text-xs text-[var(--color-muted-dim)]">
+              {new Date(selectedSale.sold_at).toLocaleString("es-ES")}
+            </p>
+          </div>
+          {#if selectedSale.status === "completed"}
+            <Button
+              variant="danger"
+              class="!px-2 !py-1 text-xs"
+              disabled={cancelling}
+              onclick={cancelSelected}
+            >
+              {cancelling ? "Anulando…" : "Anular ticket"}
+            </Button>
+          {/if}
+        </div>
         <ul class="mt-3 space-y-2">
           {#each selectedSale.lines ?? [] as line}
             <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">

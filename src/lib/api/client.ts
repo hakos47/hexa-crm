@@ -114,6 +114,8 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
         return browserApi.list_sales(token) as T;
       case "get_sale":
         return browserApi.get_sale(args?.id as number, token) as T;
+      case "cancel_sale":
+        return browserApi.cancel_sale(args?.id as number, token) as T;
       case "list_cash_movements":
         return browserApi.list_cash_movements(token) as T;
       case "create_cash_movement":
@@ -178,6 +180,7 @@ export const api = {
     }),
   listSales: () => call<Sale[]>("list_sales"),
   getSale: (id: number) => call<Sale>("get_sale", { id }),
+  cancelSale: (id: number) => call<Sale>("cancel_sale", { id }),
   listCashMovements: () => call<CashMovement[]>("list_cash_movements"),
   createCashMovement: (input: CashInput) => call<CashMovement>("create_cash_movement", { input }),
   getCashBalance: () => call<number>("get_cash_balance"),

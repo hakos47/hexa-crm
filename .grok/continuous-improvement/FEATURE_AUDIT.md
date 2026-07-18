@@ -9,4 +9,5 @@
 | CSV ventas/IVA | ciclo 0 | ok | — | csv.test |
 | Cierre caja día | ciclo 0 | ok | — | daily-close.test |
 | AI popup | ciclo 0 | ok | — | popup-state.test |
-| Devoluciones | nunca | ausente | no implementado | — |
+| Anulación ticket | **ciclo 2** | ok | void completo; sin devolución parcial | cancel-sale.test + integration |
+| Devolución parcial | nunca | ausente | no implementado | — |

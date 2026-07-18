@@ -24,6 +24,7 @@ pub fn vat_summary(db: State<'_, Db>, from: String, to: String, token: Option<St
                  FROM sale_lines l
                  JOIN sales s ON s.id = l.sale_id
                  WHERE l.vat_rate = ?1
+                   AND s.status = 'completed'
                    AND substr(s.sold_at, 1, 10) >= ?2
                    AND substr(s.sold_at, 1, 10) <= ?3",
                 params![rate, from, to],
@@ -60,7 +61,8 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
 
     let (sales_today_cents, sales_today_count): (i64, i64) = conn
         .query_row(
-            "SELECT COALESCE(SUM(total_cents),0), COUNT(*) FROM sales WHERE substr(sold_at,1,10)=?1",
+            "SELECT COALESCE(SUM(total_cents),0), COUNT(*) FROM sales
+             WHERE substr(sold_at,1,10)=?1 AND status='completed'",
             params![today],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -69,7 +71,7 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
     let (sales_month_cents, sales_month_count, vat_month_cents, base_month_cents): (i64, i64, i64, i64) =
         conn.query_row(
             "SELECT COALESCE(SUM(total_cents),0), COUNT(*), COALESCE(SUM(vat_cents),0), COALESCE(SUM(subtotal_cents),0)
-             FROM sales WHERE substr(sold_at,1,7)=?1",
+             FROM sales WHERE substr(sold_at,1,7)=?1 AND status='completed'",
             params![month],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )

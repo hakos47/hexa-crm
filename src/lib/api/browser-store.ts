@@ -32,6 +32,7 @@ import {
   shouldRejectExpiredTemp,
   validatePermanentPassword,
 } from "../auth/password-policy";
+import { countsInBusinessTotals, planCancelSale } from "../sales/cancel-sale";
 
 const KEY = "nix-c-store-v4";
 
@@ -753,6 +754,55 @@ export const browserApi = {
     return { ...sale, lines };
   },
 
+  cancel_sale(id: number, token?: string | null): Sale {
+    const s = load();
+    auth(s, token);
+    const sale = s.sales.find((x) => x.id === id);
+    if (!sale) throw new Error("Venta no encontrada");
+    const lines = s.saleLines.filter((l) => l.sale_id === id);
+    const plan = planCancelSale(
+      {
+        id: sale.id,
+        number: sale.number,
+        status: sale.status,
+        total_cents: sale.total_cents,
+      },
+      lines.map((l) => ({ product_id: l.product_id, qty: l.qty }))
+    );
+
+    const t = now();
+    sale.status = plan.new_status;
+
+    for (const r of plan.stock_restores) {
+      const p = s.products.find((x) => x.id === r.product_id);
+      if (!p) continue;
+      p.stock += r.qty;
+      p.updated_at = t;
+      s.seq.stock += 1;
+      s.stockMovements.push({
+        id: s.seq.stock,
+        product_id: r.product_id,
+        delta: r.qty,
+        reason: plan.cash_description,
+        created_at: t,
+      });
+    }
+
+    s.seq.cash += 1;
+    s.cash.push({
+      id: s.seq.cash,
+      kind: "expense",
+      amount_cents: plan.cash_expense_cents,
+      category: plan.cash_category,
+      description: plan.cash_description,
+      sale_id: sale.id,
+      occurred_at: t,
+    });
+
+    save(s);
+    return { ...sale, lines };
+  },
+
   list_cash_movements(token?: string | null): CashMovement[] {
     const s = load();
     auth(s, token);
@@ -792,6 +842,7 @@ export const browserApi = {
     }
 
     for (const sale of s.sales) {
+      if (!countsInBusinessTotals(sale.status)) continue;
       const d = sale.sold_at.slice(0, 10);
       if (d < from || d > to) continue;
       for (const line of s.saleLines.filter((l) => l.sale_id === sale.id)) {
@@ -835,6 +886,7 @@ export const browserApi = {
     let base_month_cents = 0;
 
     for (const sale of s.sales) {
+      if (!countsInBusinessTotals(sale.status)) continue;
       if (dayKey(sale.sold_at) === today) {
         sales_today_cents += sale.total_cents;
         sales_today_count += 1;

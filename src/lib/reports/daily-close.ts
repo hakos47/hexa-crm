@@ -7,6 +7,7 @@ export type DailyCloseSale = {
   total_cents: number;
   subtotal_cents: number;
   vat_cents: number;
+  status?: string;
 };
 
 export type DailyCloseCash = {
@@ -50,6 +51,7 @@ export function buildDailyCloseReport(
 
   for (const s of sales) {
     if (dayKey(s.sold_at) !== day) continue;
+    if (s.status && s.status !== "completed") continue;
     sales_count += 1;
     sales_total_cents += s.total_cents;
     sales_base_cents += s.subtotal_cents;

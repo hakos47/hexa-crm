@@ -1,5 +1,27 @@
 # CYCLE_LOG
 
+## CICLO 2 — 2026-07-18
+
+```
+CICLO 2 — 2026-07-18
+Área auditada: Ventas + Caja (anulación de ticket completo)
+Cambio de mercado relevante y fuentes:
+  - POS retail: void/cancel sale es feature core (restaurar stock y caja)
+Problema seleccionado y evidencia:
+  FEATURE_AUDIT: devoluciones ausentes; sin forma de deshacer ticket erróneo
+Hipótesis y métrica:
+  cancel_sale(completed) → stock restaurado, gasto caja = total, IVA/dashboard sin contar
+Cambios realizados:
+  - planCancelSale / canCancelSale pure helpers
+  - browserApi.cancel_sale + Tauri cancel_sale
+  - UI historial: badge anulada + botón Anular ticket
+  - VAT, dashboard, daily-close excluyen status!=completed
+Pruebas: npm test 44/44 OK; build OK; cargo check OK
+Antes → después: sin anulación → anulación completa con integridad stock/caja/IVA
+Siguiente área: a11y contraste o import CSV
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 1 — 2026-07-18
 
 ```

@@ -226,3 +226,72 @@ pub fn get_sale(db: State<'_, Db>, id: i64, token: Option<String>) -> Result<Sal
     sale.lines = Some(lines);
     Ok(sale)
 }
+
+#[tauri::command]
+pub fn cancel_sale(db: State<'_, Db>, id: i64, token: Option<String>) -> Result<Sale, String> {
+    let conn = db.lock();
+    require_session(&conn, &token)?;
+    let now = now_iso();
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+    let (number, status, total): (String, String, i64) = tx
+        .query_row(
+            "SELECT number, status, total_cents FROM sales WHERE id=?1",
+            params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|_| "Venta no encontrada".to_string())?;
+
+    if status == "cancelled" {
+        return Err("La venta ya está anulada".into());
+    }
+    if status != "completed" {
+        return Err(format!("No se puede anular una venta en estado \"{status}\""));
+    }
+
+    let mut lines_stmt = tx
+        .prepare("SELECT product_id, qty FROM sale_lines WHERE sale_id=?1")
+        .map_err(|e| e.to_string())?;
+    let restores: Vec<(i64, i64)> = lines_stmt
+        .query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(lines_stmt);
+
+    if restores.is_empty() {
+        return Err("La venta no tiene líneas para restaurar".into());
+    }
+
+    tx.execute(
+        "UPDATE sales SET status='cancelled' WHERE id=?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for (product_id, qty) in &restores {
+        tx.execute(
+            "UPDATE products SET stock = stock + ?1, updated_at = ?2 WHERE id = ?3",
+            params![qty, now, product_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO stock_movements (product_id, delta, reason, ref_type, ref_id, created_at)
+             VALUES (?1,?2,?3,'cancel',?4,?5)",
+            params![product_id, qty, format!("Anulación {number}"), id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.execute(
+        "INSERT INTO cash_movements (kind, amount_cents, category, description, sale_id, occurred_at)
+         VALUES ('expense', ?1, 'anulaciones', ?2, ?3, ?4)",
+        params![total.abs(), format!("Anulación {number}"), id, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    drop(conn);
+
+    get_sale(db, id, token)
+}
