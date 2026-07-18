@@ -34,3 +34,8 @@
 - Total ticket = Σ (PVP×qty − dto) con IVA coherente
 - Caja income = total neto de venta
 - Cobertura tests pure logic (VAT, cancel, discount)
+
+## Multi-empresa (análisis, no implementado)
+Hoy: **single-shop** (`shop_name`, un pipeline ventas/caja/IVA).  
+Objetivo grupo: estudio de software (**DEV**) + compraventa (**SHOP**) con facturación separada en un solo sistema.  
+Ver: `docs/MULTI_COMPANY_ANALYSIS.md` (Company Tenant) + `docs/ADR-001-verifactu-plan.md`.
