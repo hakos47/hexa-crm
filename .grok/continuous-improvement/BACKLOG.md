@@ -10,7 +10,8 @@ Fórmula: prioridad = (impacto × alcance × confianza) / (esfuerzo × riesgo)  
 | B4 | Import CSV productos | 3 | 3 | 4 | 3 | 2 | 6.0 | **DONE ciclo 4** |
 | B5 | Contraste a11y textos muted | 2 | 4 | 3 | 2 | 1 | 12.0 | **DONE** OSS |
 | C5 | Ajustes design system | 3 | 4 | 5 | 2 | 1 | **30** | **DONE ciclo 5** |
-| B3 | Descuento % carrito global | 3 | 3 | 4 | 2 | 2 | **9.0** | pendiente (siguiente) |
+| B3 | Descuento % carrito global | 3 | 3 | 4 | 2 | 2 | **9.0** | **DONE ciclo 6** |
 | M1 | Multi-empresa Company Tenant P0 | 5 | 4 | 4 | 5 | 3 | 5.3 | análisis listo; impl. pendiente |
+| B6 | Devolución parcial de líneas | 4 | 3 | 3 | 4 | 4 | 2.25 | pendiente |
 
-**Ciclo 5:** feedback UX — Ajustes no seguía glass/purple; rediseño sin cambiar API.
+**Ciclo 6:** % carrito 0–100 tras dto. línea; reparto en discount_cents para create_sale.

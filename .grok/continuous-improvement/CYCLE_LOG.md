@@ -1,5 +1,28 @@
 # CYCLE_LOG
 
+## CICLO 6 — 2026-07-18
+
+```
+CICLO 6 — 2026-07-18
+Área auditada: 5 — Ventas/TPV (descuento % carrito)
+Cambio de mercado relevante y fuentes:
+  - POS retail: descuento % sobre ticket es feature core (tras dto. línea)
+  - BACKLOG B3 pendiente desde ciclo 1
+Problema seleccionado y evidencia:
+  Solo dto. € por línea; cajero no puede aplicar % global al carrito
+Hipótesis y métrica:
+  planCartDiscounts(lines, %) → discount_cents por línea; total e IVA correctos
+Cambios realizados:
+  - src/lib/sales/cart-discount.ts (+ tests 6)
+  - TPV: input "Descuento carrito %"; totales con desglose; checkout usa plan
+Pruebas: npm test + check
+Antes → después: sin % carrito → 0–100% tras dto. línea, stack con create_sale
+Riesgos: redondeo céntimos en reparto multi-línea (remainder en última línea)
+Elementos aparcados: multi-empresa P0; devolución parcial
+Siguiente área candidata: multi-empresa Company Tenant P0 o devolución parcial
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 5 — 2026-07-18
 
 ```

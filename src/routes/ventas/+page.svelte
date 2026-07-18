@@ -4,6 +4,7 @@
   import type { Customer, Product, Sale, SaleLineInput } from "$lib/types";
   import { formatEUR, parseEurosInput } from "$lib/money";
   import { saleTotals, type LineInput } from "$lib/vat";
+  import { clampCartPercent, planCartDiscounts } from "$lib/sales/cart-discount";
   import Button from "$lib/components/Button.svelte";
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
@@ -19,6 +20,8 @@
   let tab = $state<"tpv" | "historial">("tpv");
   type CartLine = { product: Product; qty: number; discount_cents: number };
   let cart = $state<CartLine[]>([]);
+  /** Global cart discount 0–100%, applied after per-line euro discounts. */
+  let cartPercent = $state(0);
   let customerId = $state<string>("");
   let notes = $state("");
   let productQuery = $state("");
@@ -36,22 +39,31 @@
     )
   );
 
+  const discountPlan = $derived(
+    planCartDiscounts(
+      cart.map((c) => ({
+        unitPriceCents: c.product.price_cents,
+        qty: c.qty,
+        lineDiscountCents: Math.min(c.discount_cents, c.product.price_cents * c.qty),
+      })),
+      cartPercent,
+    ),
+  );
+
   const cartLines = $derived<LineInput[]>(
-    cart.map((c) => ({
+    cart.map((c, i) => ({
       qty: c.qty,
       unitPriceCents: c.product.price_cents,
       vatRate: c.product.vat_rate,
-      discountCents: Math.min(c.discount_cents, c.product.price_cents * c.qty),
-    }))
+      discountCents: discountPlan.lines[i]?.discountCents ?? 0,
+    })),
   );
 
   const totals = $derived(saleTotals(cartLines));
   const totalDiscountCents = $derived(
-    cart.reduce(
-      (acc, c) => acc + Math.min(c.discount_cents, c.product.price_cents * c.qty),
-      0
-    )
+    discountPlan.lines.reduce((acc, l) => acc + l.discountCents, 0),
   );
+  const cartPercentDiscountCents = $derived(discountPlan.cartDiscountTotalCents);
 
   async function load() {
     loading = true;
@@ -139,8 +151,16 @@
     });
   }
 
-  function lineNetCents(c: CartLine): number {
-    return Math.max(0, c.product.price_cents * c.qty - c.discount_cents);
+  function lineNetCents(c: CartLine, index: number): number {
+    return (
+      discountPlan.lines[index]?.lineTotalCents ??
+      Math.max(0, c.product.price_cents * c.qty - c.discount_cents)
+    );
+  }
+
+  function setCartPercentRaw(raw: string) {
+    const n = Number(String(raw).replace(",", "."));
+    cartPercent = clampCartPercent(Number.isFinite(n) ? n : 0);
   }
 
   async function checkout() {
@@ -153,18 +173,30 @@
     }
     submitting = true;
     try {
-      const lines: SaleLineInput[] = cart.map((c) => ({
+      const plan = planCartDiscounts(
+        cart.map((c) => ({
+          unitPriceCents: c.product.price_cents,
+          qty: c.qty,
+          lineDiscountCents: c.discount_cents,
+        })),
+        cartPercent,
+      );
+      const lines: SaleLineInput[] = cart.map((c, i) => ({
         product_id: c.product.id,
         qty: c.qty,
-        discount_cents: c.discount_cents > 0 ? c.discount_cents : undefined,
+        discount_cents:
+          (plan.lines[i]?.discountCents ?? 0) > 0
+            ? plan.lines[i].discountCents
+            : undefined,
       }));
       const sale = await api.createSale(
         lines,
         customerId ? Number(customerId) : null,
-        notes
+        notes,
       );
       showToast(`Venta ${sale.number} registrada`);
       cart = [];
+      cartPercent = 0;
       notes = "";
       customerId = "";
       await load();
@@ -261,7 +293,7 @@
         <EmptyState title="Carrito vacío" description="Pulsa un producto para añadirlo." />
       {:else}
         <ul class="mb-3 max-h-56 space-y-2 overflow-y-auto">
-          {#each cart as c}
+          {#each cart as c, i}
             <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">
               <div class="flex flex-wrap items-center gap-2">
                 <div class="min-w-0 flex-1 basis-[min(100%,10rem)]">
@@ -295,12 +327,28 @@
                   />
                 </label>
                 <span class="w-20 shrink-0 text-right tabular text-[var(--color-text)]">
-                  {formatEUR(lineNetCents(c))}
+                  {formatEUR(lineNetCents(c, i))}
                 </span>
               </div>
             </li>
           {/each}
         </ul>
+
+        <label class="mb-2 flex flex-col gap-1 text-xs text-[var(--color-muted)]">
+          Descuento carrito %
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.5"
+            value={cartPercent || ""}
+            placeholder="0"
+            class="field w-full max-w-[8rem] text-sm tabular"
+            oninput={(e) => setCartPercentRaw((e.target as HTMLInputElement).value)}
+            title="Porcentaje sobre el carrito tras descuentos por línea"
+            data-cart-percent
+          />
+        </label>
 
         <Select
           class="mb-2"
@@ -316,8 +364,14 @@
         <div class="mb-3 space-y-1 rounded-xl border border-[var(--color-border)] bg-black/30 p-3 text-sm">
           {#if totalDiscountCents > 0}
             <div class="flex justify-between gap-2 text-amber-200/90">
-              <span>Descuentos</span>
+              <span>Descuentos (línea + carrito)</span>
               <span class="tabular">−{formatEUR(totalDiscountCents)}</span>
+            </div>
+          {/if}
+          {#if cartPercentDiscountCents > 0}
+            <div class="flex justify-between gap-2 text-xs text-amber-200/70">
+              <span>De los cuales carrito {discountPlan.percent}%</span>
+              <span class="tabular">−{formatEUR(cartPercentDiscountCents)}</span>
             </div>
           {/if}
           <div class="flex justify-between gap-2 text-[var(--color-muted)]">

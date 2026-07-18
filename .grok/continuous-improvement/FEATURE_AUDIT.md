@@ -12,3 +12,4 @@
 | CSV ventas/IVA | ciclo 0 | ok | — | csv.test |
 | Multi-empresa | análisis docs | no impl | Company Tenant | multi-company-analysis.test |
 | Ajustes UI design | **ciclo 5** | **ok** | era formulario genérico | ajustes-layout.test |
+| Descuento % carrito | **ciclo 6** | **ok** | solo línea antes | cart-discount.test |

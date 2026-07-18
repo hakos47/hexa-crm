@@ -9,3 +9,4 @@
 | 2026-07-18 C3 | Priorizar fix integridad dto. sobre a11y/import CSV | B5 (prio 12), B4 | Filtro: integridad transaccional > UX/onboarding |
 | 2026-07-18 C4 | Import CSV con cabeceras canónicas + aliases ES | Solo EN headers | Onboarding tienda ES; round-trip con export |
 | 2026-07-18 C4 | Upsert por SKU (id si existe) | Solo create | Evita duplicados al reimportar catálogo |
+| 2026-07-18 C6 | % carrito sobre neto tras dto. línea; reparto a discount_cents | % solo sobre bruto global en un campo sale | Reusa create_sale/VAT line-based sin migrar schema |
