@@ -11,3 +11,4 @@
 | Anulación ticket | ciclo 2 | ok | parcial pendiente | cancel-sale |
 | CSV ventas/IVA | ciclo 0 | ok | — | csv.test |
 | Multi-empresa | análisis docs | no impl | Company Tenant | multi-company-analysis.test |
+| Ajustes UI design | **ciclo 5** | **ok** | era formulario genérico | ajustes-layout.test |

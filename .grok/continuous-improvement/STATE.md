@@ -1,9 +1,9 @@
 # STATE
 
-- Ciclo: **4**
-- Fecha cierre: 2026-07-18T13:10
+- Ciclo: **5**
+- Fecha cierre: 2026-07-18T17:10
 - Estado: **CYCLE_COMPLETE**
-- Área auditada: **4+9 — Inventario / importación CSV**
+- Área auditada: **11 — Ajustes / administración (design system)**
 - Bloqueos: ninguno
-- Siguiente área candidata: **13 a11y contraste** (B5) o **B3 descuento % carrito**
-- Rama: `feat/ci-cycle-4` → merge a `dev`
+- Siguiente área candidata: **B3 descuento % carrito** o multi-empresa P0
+- Rama: `feat/ci-cycle-5` → merge a `dev`

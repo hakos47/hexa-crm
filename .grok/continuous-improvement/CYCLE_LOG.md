@@ -1,5 +1,28 @@
 # CYCLE_LOG
 
+## CICLO 5 — 2026-07-18
+
+```
+CICLO 5 — 2026-07-18
+Área auditada: 11 — Ajustes / administración
+Cambio de mercado relevante y fuentes:
+  - Evidencia de producto: captura + feedback usuario “ajustes no sigue el diseño”
+  - Design system existente (dashboard, login glass-strong, section-label)
+Problema seleccionado y evidencia:
+  Stack de cards planas max-w-3xl; sin jerarquía, chips Ollama grises, Guardar al final
+Hipótesis y métrica:
+  Header + status strip + grid 2 col + Ollama glow + users rows → mismo lenguaje visual
+Cambios realizados:
+  - Redesign completo src/routes/ajustes/+page.svelte (misma lógica API)
+  - Tests estructurales ajustes-layout.test.ts (4)
+Pruebas: npm test; npm run check 0 errors
+Antes → después: formulario genérico → shell Nix-C (section-label, pills, danger zone)
+Riesgos: solo visual; sin E2E browser screenshot en CI
+Elementos aparcados: B3 % carrito; multi-empresa P0
+Siguiente área candidata: B3 descuento % carrito global
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 4 — 2026-07-18
 
 ```
