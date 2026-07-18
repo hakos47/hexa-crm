@@ -76,6 +76,24 @@
     }
   }
 
+  async function exportBackup() {
+    try {
+      const envelope = await api.exportBackup();
+      const blob = new Blob([JSON.stringify(envelope, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nix-c-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Copia de seguridad descargada");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Error al exportar", "err");
+    }
+  }
+
   function openCreateUser() {
     editingUser = null;
     userForm = { username: "", display_name: "", role: "cajero", active: true };
@@ -282,13 +300,17 @@
     {/if}
 
     <Card lift={false}>
-      <h2 class="mb-2 font-semibold">Entorno</h2>
+      <h2 class="mb-2 font-semibold">Entorno y copias</h2>
       <p class="mb-3 text-sm text-[var(--color-muted)]">
-        Modo: {api.isTauri() ? "Tauri (SQLite nativo)" : "Navegador (localStorage)"}
+        Modo: {api.isTauri() ? "Tauri (SQLite nativo)" : "Web (API / PostgreSQL o localStorage)"}
+        · Ver <code class="text-xs">docs/BACKUP.md</code>
       </p>
       <div class="flex flex-wrap gap-2">
         <Button onclick={save}>Guardar ajustes</Button>
         <Button variant="secondary" onclick={load}>Recargar</Button>
+        {#if $isAdmin}
+          <Button variant="secondary" onclick={exportBackup}>Exportar copia</Button>
+        {/if}
         {#if $isAdmin && !api.isTauri()}
           <Button variant="danger" onclick={resetDemo}>Restaurar demo</Button>
         {/if}

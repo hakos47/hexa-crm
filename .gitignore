@@ -14,3 +14,4 @@ dist
 
 # Keep continuous-improvement memory tracked under .grok/
 # (do not ignore .grok/continuous-improvement)
+scripts/create-master-user.js

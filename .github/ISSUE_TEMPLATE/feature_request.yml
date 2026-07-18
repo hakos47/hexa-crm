@@ -1,0 +1,33 @@
+name: Propuesta
+about: Propón una mejora basada en un problema real
+title: "feat: "
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema del usuario
+      description: Quién tiene el problema, cuándo y con qué impacto.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidencia
+      description: Entrevistas, frecuencia, ejemplos o datos disponibles.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Resultado esperado
+      description: Describe el resultado, no solo una interfaz concreta.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Criterios de aceptación
+      placeholder: "- [ ] ..."
+    validations:
+      required: true

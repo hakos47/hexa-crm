@@ -5,7 +5,7 @@ CRM / ERP ligero para tienda: **inventario**, **ventas (TPV)**, **caja**, **clie
 Diseñado para **consumo mínimo** (local-first, SQLite, modelos Ollama pequeños) y UI **moderna dark glass** con animaciones fluidas (Svelte 5).
 
 > **Convenciones del proyecto** (ramas, nightlies, carpetas, dónde tocar cada cosa): ver **[AGENTS.md](./AGENTS.md)**.  
-> Remoto: [hakos47/hexa-crm](https://github.com/hakos47/hexa-crm).
+> Remoto: [HEXA-NIX/hexa-crm](https://github.com/HEXA-NIX/hexa-crm).
 
 ## Stack
 

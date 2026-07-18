@@ -55,91 +55,26 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 
   try {
-    switch (cmd) {
-      case "public_meta":
-        return browserApi.public_meta() as T;
-      case "login":
-        return (await browserApi.login(
-          args?.username as string,
-          (args?.password as string) ?? (args?.pin as string)
-        )) as T;
-      case "logout":
-        browserApi.logout(token);
-        return undefined as T;
-      case "session_me":
-        return (await browserApi.session_me(token)) as T;
-      case "list_users":
-        return (await browserApi.list_users(token)) as T;
-      case "upsert_user":
-        return (await browserApi.upsert_user(args?.input as UserInput, token)) as T;
-      case "change_own_pin":
-        await browserApi.change_own_pin(
-          args?.current_pin as string,
-          args?.new_pin as string,
-          token
-        );
-        return undefined as T;
-      case "complete_forced_password_change":
-        return (await browserApi.complete_forced_password_change(
-          args?.current_password as string,
-          args?.new_password as string,
-          token
-        )) as T;
-      case "list_products":
-        return browserApi.list_products(
-          (args?.active_only as boolean | undefined) ?? true,
-          token
-        ) as T;
-      case "upsert_product":
-        return browserApi.upsert_product(args?.input as ProductInput, token) as T;
-      case "adjust_stock":
-        return browserApi.adjust_stock(
-          args?.product_id as number,
-          args?.delta as number,
-          args?.reason as string,
-          token
-        ) as T;
-      case "list_customers":
-        return browserApi.list_customers(token) as T;
-      case "upsert_customer":
-        return browserApi.upsert_customer(args?.input as CustomerInput, token) as T;
-      case "create_sale":
-        return browserApi.create_sale(
-          args?.lines as SaleLineInput[],
-          args?.customer_id as number | null | undefined,
-          args?.notes as string | undefined,
-          token
-        ) as T;
-      case "list_sales":
-        return browserApi.list_sales(token) as T;
-      case "get_sale":
-        return browserApi.get_sale(args?.id as number, token) as T;
-      case "cancel_sale":
-        return browserApi.cancel_sale(args?.id as number, token) as T;
-      case "list_cash_movements":
-        return browserApi.list_cash_movements(token) as T;
-      case "create_cash_movement":
-        return browserApi.create_cash_movement(args?.input as CashInput, token) as T;
-      case "get_cash_balance":
-        return browserApi.get_cash_balance(token) as T;
-      case "vat_summary":
-        return browserApi.vat_summary(args?.from as string, args?.to as string, token) as T;
-      case "dashboard_stats":
-        return browserApi.dashboard_stats(token) as T;
-      case "get_settings":
-        return browserApi.get_settings(token) as T;
-      case "update_settings":
-        return browserApi.update_settings(args?.partial as Partial<Settings>, token) as T;
-      case "ai_chat":
-        return (await browserApi.ai_chat(args?.messages as AiMessage[], token)) as T;
-      case "ollama_health":
-        return (await browserApi.ollama_health(token)) as T;
-      case "reset_demo":
-        await browserApi.reset_demo(token);
-        return undefined as T;
-      default:
-        throw new Error(`Comando no soportado en browser: ${cmd}`);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
+
+    const response = await fetch("/api/rpc", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ cmd, args }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const errMsg = errData.error || `HTTP error! status: ${response.status}`;
+      throw new Error(errMsg);
+    }
+
+    return (await response.json()) as T;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("Sesión") || msg.includes("sesión")) {
@@ -192,5 +127,9 @@ export const api = {
   aiChat: (messages: AiMessage[]) => call<AiChatResult>("ai_chat", { messages }),
   ollamaHealth: () => call<{ ok: boolean; models: string[] }>("ollama_health"),
   resetDemo: () => call<void>("reset_demo"),
+  exportBackup: () => call<unknown>("export_backup"),
+  preMigrationBackup: (reason: string) =>
+    call<unknown>("pre_migration_backup", { reason }),
+  restoreBackup: (raw: unknown) => call<void>("restore_backup", { raw }),
   isTauri,
 };

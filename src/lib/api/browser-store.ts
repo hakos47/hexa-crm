@@ -33,6 +33,13 @@ import {
   validatePermanentPassword,
 } from "../auth/password-policy";
 import { countsInBusinessTotals, planCancelSale } from "../sales/cancel-sale";
+import { extractOllamaReply, ollamaChatBody } from "../ai/ollama-reply";
+import {
+  createBackupEnvelope,
+  createPreMigrationBackup,
+  validateBackup,
+  type BackupEnvelope,
+} from "../backup/backup";
 
 const KEY = "nix-c-store-v4";
 
@@ -930,10 +937,32 @@ export const browserApi = {
     auth(s, token);
     const stats = this.dashboard_stats(token);
     const low = stats.low_stock.map((p) => `${p.name} (${p.stock})`).join(", ") || "ninguno";
+
+    // Yesterday (local) for questions like "¿cuánto ganamos ayer?"
+    const yesterday = (() => {
+      const d = new Date(now());
+      d.setDate(d.getDate() - 1);
+      return dayKey(d.toISOString());
+    })();
+    let sales_yesterday_cents = 0;
+    let sales_yesterday_count = 0;
+    for (const sale of s.sales) {
+      if (!countsInBusinessTotals(sale.status)) continue;
+      if (dayKey(sale.sold_at) === yesterday) {
+        sales_yesterday_cents += sale.total_cents;
+        sales_yesterday_count += 1;
+      }
+    }
+
     const context = {
       tienda: s.settings.shop_name,
+      fecha_hoy: dayKey(now()),
       ventas_hoy_eur: (stats.sales_today_cents / 100).toFixed(2),
+      tickets_hoy: stats.sales_today_count,
+      ventas_ayer_eur: (sales_yesterday_cents / 100).toFixed(2),
+      tickets_ayer: sales_yesterday_count,
       ventas_mes_eur: (stats.sales_month_cents / 100).toFixed(2),
+      tickets_mes: stats.sales_month_count,
       caja_eur: (stats.cash_balance_cents / 100).toFixed(2),
       iva_mes_eur: (stats.vat_month_cents / 100).toFixed(2),
       stock_bajo: low,
@@ -954,26 +983,42 @@ Contexto actual (JSON compacto): ${JSON.stringify(context)}
 No inventes datos fuera del contexto. Si falta info, dilo.`;
 
     try {
-      const res = await fetch(`${s.settings.ollama_url}/api/chat`, {
+      const baseUrl = s.settings.ollama_url.replace(/\/$/, "");
+      // think:false required for qwen3.5 / reasoning models (empty content otherwise).
+      const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: s.settings.ollama_model,
-          stream: false,
-          messages: [{ role: "system", content: system }, ...messages],
-          options: { temperature: 0.4, num_predict: 400 },
-        }),
+        body: JSON.stringify(
+          ollamaChatBody(s.settings.ollama_model, [
+            { role: "system", content: system },
+            ...messages,
+          ]),
+        ),
       });
-      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
-      const data = (await res.json()) as { message?: { content?: string }; model?: string };
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Ollama HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      const data = (await res.json()) as {
+        message?: { content?: string; thinking?: string };
+        model?: string;
+        error?: string;
+      };
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const reply = extractOllamaReply(data.message);
       return {
-        reply: data.message?.content?.trim() || "Sin respuesta del modelo.",
+        reply,
         model: data.model || s.settings.ollama_model,
       };
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      const offline = /fetch|network|Failed to fetch|ECONNREFUSED|connect/i.test(detail);
       return {
-        reply:
-          "No puedo conectar con Ollama. Comprueba que `ollama serve` está activo y el modelo está instalado. La app sigue funcionando sin IA.",
+        reply: offline
+          ? "No puedo conectar con Ollama. Comprueba que `ollama serve` está activo y el modelo está instalado. La app sigue funcionando sin IA."
+          : `Error de Ollama: ${detail}`,
         model: s.settings.ollama_model,
         offline: true,
       };
@@ -1000,5 +1045,36 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     fresh.users = users;
     fresh.seq.user = 2;
     save(fresh);
+  },
+
+  /** Full store export (admin). Versioned + checksum — see docs/BACKUP.md */
+  async export_backup(token?: string | null): Promise<BackupEnvelope> {
+    const s = load();
+    requireAdmin(s, token);
+    // Strip session tokens from backup for safer transport
+    const { sessions: _s, ...rest } = s;
+    return createBackupEnvelope({ ...rest, sessions: {} });
+  },
+
+  /** Validate and restore store from envelope (admin). Rejects corrupt copies. */
+  async restore_backup(raw: unknown, token?: string | null): Promise<void> {
+    const s = load();
+    requireAdmin(s, token);
+    const v = await validateBackup(raw);
+    if (!v.ok) throw new Error(v.error);
+    const payload = v.envelope.payload as Store;
+    if (!payload || !Array.isArray(payload.products) || !Array.isArray(payload.users)) {
+      throw new Error("Copia inválida: estructura de tienda incompleta.");
+    }
+    // Keep current sessions empty after restore — force re-login
+    save({ ...payload, sessions: {} });
+  },
+
+  /** Snapshot before schema/migration-like operations (admin). */
+  async pre_migration_backup(reason: string, token?: string | null): Promise<BackupEnvelope> {
+    const s = load();
+    requireAdmin(s, token);
+    const { sessions: _s, ...rest } = s;
+    return createPreMigrationBackup({ ...rest, sessions: {} }, reason);
   },
 };

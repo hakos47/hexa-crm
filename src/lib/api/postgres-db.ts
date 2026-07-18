@@ -1,10 +1,21 @@
 import postgres from "postgres";
 import { hashPin, verifyCredential } from "../auth/pin";
 import {
+  clearTempCredentialFields,
+  generateTempPassword,
+  issueTempCredentialFields,
   shouldRejectExpiredTemp,
+  validatePermanentPassword,
 } from "../auth/password-policy";
+import { validatePin } from "../auth/pin";
 import { extractOllamaReply, ollamaChatBody } from "../ai/ollama-reply";
 import { isVatRate, lineBreakdown, type VatRate } from "../vat";
+import {
+  createBackupEnvelope,
+  createPreMigrationBackup,
+  validateBackup,
+  type BackupEnvelope,
+} from "../backup/backup";
 import type {
   AiChatResult,
   AiMessage,
@@ -371,25 +382,37 @@ export const postgresApi = {
   async upsert_user(input: UserInput, token: string | null): Promise<CreateUserResult> {
     await requireAdmin(token);
     const now = new Date();
+    const role = input.role === "cajero" ? "cajero" : "admin";
+    const username = input.username.trim().toLowerCase();
+    if (!username) throw new Error("Usuario obligatorio");
 
     if (input.id) {
-      // Update
-      const updateData: Record<string, any> = {
-        username: input.username,
-        display_name: input.display_name,
-        role: input.role,
-        active: input.active,
+      const updateData: Record<string, unknown> = {
+        username,
+        display_name: input.display_name.trim() || username,
+        role,
+        active: input.active ?? true,
       };
 
-      if (input.secret) {
-        updateData.pin_hash = await hashPin(input.secret);
-        if (input.must_change_password) {
-          updateData.must_change_password = true;
-          updateData.temp_password_issued_at = now;
-        } else {
-          updateData.must_change_password = false;
-          updateData.temp_password_issued_at = null;
+      let temporary_password: string | undefined;
+      if (input.pin === "__regen_temp__") {
+        temporary_password = generateTempPassword();
+        const fields = issueTempCredentialFields();
+        updateData.pin_hash = await hashPin(temporary_password);
+        updateData.must_change_password = fields.must_change_password;
+        updateData.temp_password_issued_at = fields.temp_password_issued_at
+          ? new Date(fields.temp_password_issued_at)
+          : now;
+      } else if (input.pin) {
+        const pinOk = !validatePin(input.pin);
+        const pwOk = !validatePermanentPassword(input.pin);
+        if (!pinOk && !pwOk) {
+          throw new Error(validatePermanentPassword(input.pin) || "Credencial no válida");
         }
+        updateData.pin_hash = await hashPin(input.pin);
+        const cleared = clearTempCredentialFields();
+        updateData.must_change_password = cleared.must_change_password;
+        updateData.temp_password_issued_at = null;
       }
 
       const res = await sql`
@@ -411,41 +434,41 @@ export const postgresApi = {
           must_change_password: !!u.must_change_password,
           temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
         },
-      };
-    } else {
-      // Create
-      if (!input.secret) throw new Error("Se requiere contraseña/PIN para nuevo usuario");
-      const hash = await hashPin(input.secret);
-      const mustChange = !!input.must_change_password;
-
-      const res = await sql`
-        INSERT INTO users (username, display_name, role, pin_hash, active, must_change_password, temp_password_issued_at)
-        VALUES (
-          ${input.username},
-          ${input.display_name},
-          ${input.role},
-          ${hash},
-          ${input.active},
-          ${mustChange},
-          ${mustChange ? now : null}
-        )
-        RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
-      `;
-      const u = res[0];
-      return {
-        user: {
-          id: u.id,
-          username: u.username,
-          display_name: u.display_name,
-          role: u.role,
-          active: u.active,
-          created_at: toIso(u.created_at),
-          must_change_password: !!u.must_change_password,
-          temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
-        },
-        temporary_secret: mustChange ? input.secret : undefined,
+        temporary_password,
       };
     }
+
+    const temporary_password = generateTempPassword();
+    const fields = issueTempCredentialFields();
+    const hash = await hashPin(temporary_password);
+
+    const res = await sql`
+      INSERT INTO users (username, display_name, role, pin_hash, active, must_change_password, temp_password_issued_at)
+      VALUES (
+        ${username},
+        ${input.display_name.trim() || username},
+        ${role},
+        ${hash},
+        ${input.active ?? true},
+        ${fields.must_change_password},
+        ${fields.temp_password_issued_at ? new Date(fields.temp_password_issued_at) : now}
+      )
+      RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
+    `;
+    const u = res[0];
+    return {
+      user: {
+        id: u.id,
+        username: u.username,
+        display_name: u.display_name,
+        role: u.role,
+        active: u.active,
+        created_at: toIso(u.created_at),
+        must_change_password: !!u.must_change_password,
+        temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+      },
+      temporary_password,
+    };
   },
 
   async change_own_pin(current_pin: string, new_pin: string, token: string | null): Promise<void> {
@@ -924,8 +947,8 @@ export const postgresApi = {
       kind: m.kind,
       amount_cents: m.amount_cents,
       category: m.category,
-      description: m.description,
-      sale_id: m.sale_id || undefined,
+      description: m.description ?? "",
+      sale_id: m.sale_id ?? null,
       sale_number: m.sale_number || undefined,
       occurred_at: toIso(m.occurred_at),
     }));
@@ -946,7 +969,8 @@ export const postgresApi = {
       kind: m.kind,
       amount_cents: m.amount_cents,
       category: m.category,
-      description: m.description,
+      description: m.description ?? "",
+      sale_id: m.sale_id ?? null,
       occurred_at: toIso(m.occurred_at),
     };
   },
@@ -1112,7 +1136,10 @@ export const postgresApi = {
       shop_name: settingsMap.get("shop_name") || "Mi Tienda",
       ollama_model: settingsMap.get("ollama_model") || "qwen3.5:4b",
       ollama_url: settingsMap.get("ollama_url") || "http://127.0.0.1:11434",
-      default_vat: Number(settingsMap.get("default_vat") || "21"),
+      default_vat: (() => {
+        const n = Number(settingsMap.get("default_vat") || "21");
+        return isVatRate(n) ? n : 21;
+      })(),
     };
   },
 
@@ -1161,9 +1188,16 @@ export const postgresApi = {
       ),
     };
 
-    const systemPrompt = `Eres el asistente de la tienda "${settings.shop_name}" en España. Responde en español, de manera concisa y técnica. 
-Precios en EUR con IVA incluido. Contexto de negocio actual: ${JSON.stringify(context)}.
-No inventes datos fuera de este contexto. Si requieres más información, indícalo cortésmente.`;
+    const systemPrompt = `Te llamas Lucía y eres la asistente virtual inteligente de la tienda "${settings.shop_name}" en España. 
+Responde siempre en español, de manera concisa, técnica y con un tono profesional pero cercano y de chica.
+Tus habilidades en este CRM incluyen:
+- Gestionar y supervisar el inventario (alertar sobre existencias bajas).
+- Analizar estadísticas de ventas del día, comparativa con el ayer y consolidados mensuales.
+- Controlar movimientos de efectivo e ingresos de caja.
+- Calcular desgloses de impuestos e IVA (0%, 4%, 10%, 21% de España).
+- Apoyar en operaciones de ventas y facturación de mostrador.
+Precios en EUR con IVA incluido. Contexto de negocio actual (JSON compacto): ${JSON.stringify(context)}.
+No inventes datos fuera de este contexto. Si falta información, indícalo educadamente.`;
 
     const payloadMsgs = [
       { role: "system", content: systemPrompt },
@@ -1175,7 +1209,7 @@ No inventes datos fuera de este contexto. Si requieres más información, indíc
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ollamaChatBody(settings.ollama_model, payloadMsgs)),
+        body: JSON.stringify(ollamaChatBody(settings.ollama_model, payloadMsgs, { num_predict: 96 })),
       });
 
       if (!response.ok) {
@@ -1232,5 +1266,53 @@ No inventes datos fuera de este contexto. Si requieres más información, indíc
     // Truncar tablas y volver a sembrar
     await sql`TRUNCATE TABLE sessions, cash_movements, sale_lines, sales, stock_movements, products, customers RESTART IDENTITY CASCADE`;
     await seedProductsAndCustomers();
+  },
+
+  async export_backup(token: string | null): Promise<BackupEnvelope> {
+    await requireAdmin(token);
+    const [products, customers, sales, sale_lines, cash_movements, stock_movements, settings, users] =
+      await Promise.all([
+        sql`SELECT * FROM products ORDER BY id`,
+        sql`SELECT * FROM customers ORDER BY id`,
+        sql`SELECT * FROM sales ORDER BY id`,
+        sql`SELECT * FROM sale_lines ORDER BY id`,
+        sql`SELECT * FROM cash_movements ORDER BY id`,
+        sql`SELECT * FROM stock_movements ORDER BY id`,
+        sql`SELECT * FROM settings ORDER BY key`,
+        sql`SELECT id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at FROM users ORDER BY id`,
+      ]);
+    return createBackupEnvelope({
+      backend: "postgres",
+      products,
+      customers,
+      sales,
+      sale_lines,
+      cash_movements,
+      stock_movements,
+      settings,
+      users,
+    });
+  },
+
+  async pre_migration_backup(reason: string, token: string | null): Promise<BackupEnvelope> {
+    await requireAdmin(token);
+    const full = await this.export_backup(token);
+    return createPreMigrationBackup(full.payload, reason);
+  },
+
+  async restore_backup(raw: unknown, token: string | null): Promise<void> {
+    await requireAdmin(token);
+    const v = await validateBackup(raw);
+    if (!v.ok) throw new Error(v.error);
+    const p = v.envelope.payload as { backend?: string; products?: unknown[] };
+    if (!p || p.backend !== "postgres" || !Array.isArray(p.products)) {
+      throw new Error(
+        "Copia inválida o de otro backend. Restaura copias Postgres con este endpoint; localStorage usa la app browser.",
+      );
+    }
+    // Conservative: full restore is destructive; require explicit structure
+    throw new Error(
+      "Restauración completa Postgres desde UI desactivada por seguridad. Usa docs/BACKUP.md (pg_dump) o un runbook admin.",
+    );
   },
 };

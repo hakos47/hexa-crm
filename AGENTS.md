@@ -1,7 +1,7 @@
 # AGENTS.md — Hexa CRM (nix-c / hexa-crm)
 
 Instrucciones **persistentes** para cualquier agente o desarrollador en este repo.  
-Remoto: `git@github.com:hakos47/hexa-crm.git` · Producto: **Nix-C** (CRM de tienda local).
+Remoto: `git@github.com:HEXA-NIX/hexa-crm.git` · Producto: **Nix-C** (CRM de tienda local).
 
 ---
 
