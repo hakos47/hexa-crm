@@ -11,7 +11,11 @@
   import Input from "$lib/components/Input.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
+  import SortableHeader from "$lib/components/SortableHeader.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { nextSortDirection, sortRows, type SortDirection } from "$lib/table-sort";
+
+  type SortKey = "name" | "category" | "stock" | "price" | "vat" | "cost";
 
   let products = $state<Product[]>([]);
   let query = $state("");
@@ -23,6 +27,8 @@
   let stockTarget = $state<Product | null>(null);
   let stockDelta = $state("1");
   let stockReason = $state("Reposición");
+  let sortKey = $state<SortKey>("name");
+  let sortDirection = $state<SortDirection>("asc");
 
   let form = $state({
     sku: "",
@@ -42,8 +48,8 @@
     )
   );
 
-  const filtered = $derived(
-    products.filter((p) => {
+  const filtered = $derived.by(() => {
+    const matches = products.filter((p) => {
       const q = query.toLowerCase();
       const matchQ =
         !q ||
@@ -52,8 +58,21 @@
         (p.category || "").toLowerCase().includes(q);
       const matchCat = !categoryFilter || p.category === categoryFilter;
       return matchQ && matchCat;
-    })
-  );
+    });
+    return sortRows(matches, sortDirection, (p) => {
+      if (sortKey === "name") return p.name;
+      if (sortKey === "category") return p.category;
+      if (sortKey === "stock") return p.stock;
+      if (sortKey === "price") return p.price_cents;
+      if (sortKey === "vat") return p.vat_rate;
+      return p.cost_cents;
+    });
+  });
+
+  function sortBy(key: SortKey) {
+    sortDirection = nextSortDirection(sortKey, key, sortDirection);
+    sortKey = key;
+  }
 
   async function load() {
     loading = true;
@@ -185,12 +204,12 @@
       <table class="w-full min-w-[36rem] text-left text-sm">
         <thead class="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
           <tr>
-            <th class="px-4 py-3 font-medium">Producto</th>
-            <th class="px-4 py-3 font-medium">Categoría</th>
-            <th class="px-4 py-3 font-medium">Stock</th>
-            <th class="px-4 py-3 font-medium">PVP</th>
-            <th class="px-4 py-3 font-medium">IVA</th>
-            <th class="px-4 py-3 font-medium">Coste</th>
+            <SortableHeader label="Producto" active={sortKey === "name"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("name")} />
+            <SortableHeader label="Categoría" active={sortKey === "category"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("category")} />
+            <SortableHeader label="Stock" active={sortKey === "stock"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("stock")} />
+            <SortableHeader label="PVP" active={sortKey === "price"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("price")} />
+            <SortableHeader label="IVA" active={sortKey === "vat"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("vat")} />
+            <SortableHeader label="Coste" active={sortKey === "cost"} direction={sortDirection} class="px-4 py-2 font-medium" onclick={() => sortBy("cost")} />
             <th class="px-4 py-3 font-medium"></th>
           </tr>
         </thead>

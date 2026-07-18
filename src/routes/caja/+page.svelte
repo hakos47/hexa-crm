@@ -11,15 +11,21 @@
   import KpiCard from "$lib/components/KpiCard.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
+  import SortableHeader from "$lib/components/SortableHeader.svelte";
   import { showToast } from "$lib/stores/ui";
   import { buildDailyCloseReport } from "$lib/reports/daily-close";
   import type { Sale } from "$lib/types";
+  import { nextSortDirection, sortRows, type SortDirection } from "$lib/table-sort";
+
+  type MovementSortKey = "date" | "kind" | "category" | "description" | "amount";
 
   let movements = $state<CashMovement[]>([]);
   let balance = $state(0);
   let sales = $state<Sale[]>([]);
   let loading = $state(true);
   let open = $state(false);
+  let movementSortKey = $state<MovementSortKey>("date");
+  let movementSortDirection = $state<SortDirection>("desc");
   let closeDay = $state(new Date().toISOString().slice(0, 10));
   let form = $state({
     kind: "expense",
@@ -50,6 +56,24 @@
   const dayClose = $derived(
     buildDailyCloseReport(closeDay, sales, movements, balance)
   );
+  const sortedMovements = $derived(
+    sortRows(movements, movementSortDirection, (movement) => {
+      if (movementSortKey === "date") return new Date(movement.occurred_at).getTime();
+      if (movementSortKey === "kind") return label(movement.kind);
+      if (movementSortKey === "category") return movement.category;
+      if (movementSortKey === "description") return movement.description;
+      return movement.kind === "expense" ? -movement.amount_cents : movement.amount_cents;
+    })
+  );
+
+  function sortMovementsBy(key: MovementSortKey) {
+    movementSortDirection = nextSortDirection(
+      movementSortKey,
+      key,
+      movementSortDirection
+    );
+    movementSortKey = key;
+  }
 
   async function save() {
     const cents = parseEurosInput(form.amount);
@@ -160,15 +184,15 @@
       <table class="w-full min-w-[32rem] text-left text-sm">
         <thead class="border-b border-white/10 text-xs uppercase text-slate-500">
           <tr>
-            <th class="px-4 py-3">Fecha</th>
-            <th class="px-4 py-3">Tipo</th>
-            <th class="px-4 py-3">Categoría</th>
-            <th class="px-4 py-3">Descripción</th>
-            <th class="px-4 py-3 text-right">Importe</th>
+            <SortableHeader label="Fecha" active={movementSortKey === "date"} direction={movementSortDirection} class="px-4 py-2" onclick={() => sortMovementsBy("date")} />
+            <SortableHeader label="Tipo" active={movementSortKey === "kind"} direction={movementSortDirection} class="px-4 py-2" onclick={() => sortMovementsBy("kind")} />
+            <SortableHeader label="Categoría" active={movementSortKey === "category"} direction={movementSortDirection} class="px-4 py-2" onclick={() => sortMovementsBy("category")} />
+            <SortableHeader label="Descripción" active={movementSortKey === "description"} direction={movementSortDirection} class="px-4 py-2" onclick={() => sortMovementsBy("description")} />
+            <SortableHeader label="Importe" active={movementSortKey === "amount"} direction={movementSortDirection} align="right" class="px-4 py-2" onclick={() => sortMovementsBy("amount")} />
           </tr>
         </thead>
         <tbody>
-          {#each movements as m}
+          {#each sortedMovements as m}
             <tr class="border-b border-white/5 hover:bg-white/[0.03]">
               <td class="px-4 py-3 text-slate-400">{new Date(m.occurred_at).toLocaleString("es-ES")}</td>
               <td class="px-4 py-3"><Badge tone={tone(m.kind)}>{label(m.kind)}</Badge></td>
