@@ -1,5 +1,32 @@
 # CYCLE_LOG
 
+## CICLO 3 — 2026-07-18
+
+```
+CICLO 3 — 2026-07-18
+Área auditada: 5 — Ventas/TPV (path PostgreSQL /api/rpc)
+Cambio de mercado relevante y fuentes:
+  - Descuentos por línea = core POS (evidencia ciclo 1)
+  - Integridad de caja/IVA con descuento = requisito operativo (auditoría local)
+Problema seleccionado y evidencia:
+  postgresApi.create_sale ignoraba line.discount_cents; UI TPV sí enviaba dto.
+  Antes live: total = PVP bruto; caja inflada; IVA sobre bruto.
+Hipótesis y métrica:
+  Usar lineBreakdown(vat.ts) + cap dto → total_cents y cash income = neto
+Cambios realizados:
+  - create_sale aplica discount_cents (cap 0..PVP×qty) y isVatRate
+  - Tests sale-line-plan.test.ts (4)
+  - Memoria CI actualizada
+Pruebas: npm test 53/53 OK; build OK
+  Live RPC: café 9,90 − 0,90 dto → total 900 cts; cash += 900
+  Adyacente: venta con dto 1700 + cancel → cash restaura
+Antes → después: dto ignorado → dto aplicado con IVA y caja correctos
+Riesgos: sale_lines sin columna discount_cents (solo neto en totales); Tauri SQLite path ya OK
+Elementos aparcados: B5 a11y; B4 import CSV; B3 % carrito; devolución parcial
+Siguiente área candidata: a11y contraste (B5) o import CSV (B4)
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 2 — 2026-07-18
 
 ```

@@ -5,7 +5,7 @@
 - Cajero: TPV, clientes, stock básico
 
 ## Jobs-to-be-done
-1. Cobrar rápido con stock correcto e IVA
+1. Cobrar rápido con stock correcto e IVA (incl. descuentos)
 2. Controlar caja del día
 3. Exportar datos para contable
 4. Reponer stock bajo mínimo
@@ -17,17 +17,20 @@
 | Auth | login / force PW | estable |
 | Dashboard | / | KPIs + stock bajo |
 | Inventario | /inventario | categorías + stock |
-| Ventas | /ventas | TPV + historial + CSV |
+| Ventas | /ventas | TPV + dto. línea + historial + void + CSV |
 | Caja | /caja | movimientos + cierre día |
 | Clientes | /clientes | CRM ligero |
 | Impuestos | /impuestos | libro IVA + CSV |
 | Ajustes | /ajustes | tienda, Ollama, users |
-| IA | popup | Ollama local |
+| IA | popup | Ollama local (`think:false`) |
 
-## Stack (fuente de verdad)
-Svelte 5 + SvelteKit static + Tailwind 4 + Tauri 2 + SQLite + Ollama (no Cloudflare).
+## Stack (fuente de verdad en repo)
+- UI: Svelte 5 + SvelteKit + Tailwind 4
+- Desktop: Tauri 2 + SQLite (commands Rust)
+- Web dev: `/api/rpc` → PostgreSQL (`postgres` package) + Ollama
+- No migrar a Cloudflare sin autorización
 
 ## Métricas candidatas
-- Pasos para aplicar descuento en venta
-- Tiempo hasta ticket con SKU Enter
-- Cobertura tests pure logic
+- Total ticket = Σ (PVP×qty − dto) con IVA coherente
+- Caja income = total neto de venta
+- Cobertura tests pure logic (VAT, cancel, discount)
