@@ -116,6 +116,18 @@ npm run tauri:build  # empaquetado
 4. Sin pretensiones fiscales no demostradas  
 5. Contribuciones bajo MIT  
 
+## MCP (agentes)
+
+Servidor de herramientas para Grok/Cursor: cada acción en un archivo.
+
+```bash
+npm run mcp:install && npm run mcp:build
+# CRM en :1420, luego:
+NIX_C_URL=http://127.0.0.1:1420 npm run mcp:dev
+```
+
+Ver [tools/mcp/README.md](./tools/mcp/README.md).
+
 ## Comunidad
 
 - Issues y PRs en GitHub  
