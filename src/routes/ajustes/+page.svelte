@@ -12,6 +12,14 @@
   import { showToast } from "$lib/stores/ui";
   import { currentUser, isAdmin, clearSession } from "$lib/stores/session";
   import { TEMP_PASSWORD_LENGTH } from "$lib/auth/password-policy";
+  import {
+    applyGitHubUpdate,
+    checkGitHubUpdate,
+    getAppVersion,
+    DEFAULT_RELEASES_PAGE,
+  } from "$lib/update/check";
+  import type { UpdateStatus } from "$lib/update/version";
+  import { openExternalUrl } from "$lib/update/open-url";
 
   let settings = $state<Settings | null>(null);
   let health = $state<{ ok: boolean; models: string[] } | null>(null);
@@ -19,6 +27,10 @@
   let loading = $state(true);
   let defaultVatStr = $state("21");
   let roleStr = $state<string>("cajero");
+
+  let appVersion = $state(getAppVersion());
+  let updateStatus = $state<UpdateStatus | null>(null);
+  let updateBusy = $state(false);
 
   let userModal = $state(false);
   let editingUser = $state<AuthUser | null>(null);
@@ -194,6 +206,58 @@
 
   function selectModel(m: string) {
     if (settings) settings.ollama_model = m;
+  }
+
+  async function onCheckUpdate() {
+    updateBusy = true;
+    updateStatus = null;
+    try {
+      updateStatus = await checkGitHubUpdate({ isDesktop: api.isTauri() });
+      if (updateStatus.kind === "error") {
+        showToast(updateStatus.message, "err");
+      } else if (updateStatus.kind === "update_available") {
+        showToast(updateStatus.message, "info");
+      } else {
+        showToast(updateStatus.message);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Error al comprobar actualizaciones";
+      updateStatus = {
+        kind: "error",
+        current_version: appVersion,
+        latest_version: null,
+        release_name: null,
+        html_url: null,
+        download_url: null,
+        message: msg,
+        can_install_in_app: false,
+      };
+      showToast(msg, "err");
+    } finally {
+      updateBusy = false;
+    }
+  }
+
+  async function onApplyUpdate() {
+    if (!updateStatus) {
+      showToast("Primero comprueba si hay actualizaciones", "info");
+      return;
+    }
+    updateBusy = true;
+    try {
+      const result = await applyGitHubUpdate(updateStatus, openExternalUrl, {
+        isDesktop: api.isTauri(),
+      });
+      showToast(result.message, result.ok ? "info" : "err");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Error al abrir la descarga", "err");
+    } finally {
+      updateBusy = false;
+    }
+  }
+
+  function openReleasesPage() {
+    openExternalUrl(DEFAULT_RELEASES_PAGE);
   }
 </script>
 
@@ -468,6 +532,90 @@
         {/if}
       </Card>
     {/if}
+
+    <!-- Updates from GitHub -->
+    <div data-update-panel="github" class="lg:col-span-2">
+    <Card
+      lift={false}
+      class="relative overflow-hidden border border-[var(--color-border-strong)] !p-5 glow-purple"
+    >
+      <div
+        class="pointer-events-none absolute -right-10 top-0 h-32 w-40 rounded-full bg-purple-500/15 blur-3xl"
+      ></div>
+      <div class="relative">
+        <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="section-label mb-1">Actualizaciones</p>
+            <h2 class="text-lg font-semibold text-radiant-bright">Desde GitHub</h2>
+            <p class="mt-1 text-sm text-[var(--color-muted)]">
+              Versión instalada:
+              <span class="font-mono text-[var(--color-purple-bright)]" data-app-version>
+                {appVersion}
+              </span>
+              · Canal: HEXA-NIX/hexa-crm Releases
+            </p>
+          </div>
+          {#if updateStatus}
+            <Badge
+              tone={updateStatus.kind === "update_available"
+                ? "warn"
+                : updateStatus.kind === "up_to_date"
+                  ? "ok"
+                  : "danger"}
+            >
+              {updateStatus.kind === "update_available"
+                ? "Disponible"
+                : updateStatus.kind === "up_to_date"
+                  ? "Al día"
+                  : "Error"}
+            </Badge>
+          {/if}
+        </div>
+
+        {#if updateStatus}
+          <p class="mb-3 rounded-xl border border-[var(--color-border)] bg-black/30 px-3 py-2 text-sm text-[var(--color-muted)]" data-update-status>
+            {updateStatus.message}
+            {#if updateStatus.latest_version && updateStatus.kind === "update_available"}
+              <span class="mt-1 block font-mono text-xs text-[var(--color-purple-bright)]">
+                Remoto: v{updateStatus.latest_version}
+              </span>
+            {/if}
+          </p>
+        {/if}
+
+        {#if !api.isTauri()}
+          <p
+            class="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90"
+            data-update-web-fallback
+          >
+            Modo web: puedes comprobar releases y abrir GitHub, pero <strong>no</strong> se instala
+            un binario en el navegador. La actualización completa del empaquetado es para la app de
+            escritorio (Tauri).
+          </p>
+        {/if}
+
+        <div class="flex flex-wrap gap-2">
+          <Button onclick={onCheckUpdate} disabled={updateBusy}>
+            {updateBusy ? "Comprobando…" : "Buscar actualizaciones"}
+          </Button>
+          <Button
+            variant="secondary"
+            onclick={onApplyUpdate}
+            disabled={updateBusy || updateStatus?.kind !== "update_available"}
+          >
+            {api.isTauri() ? "Descargar / instalar" : "Abrir descarga en GitHub"}
+          </Button>
+          <Button variant="ghost" onclick={openReleasesPage} disabled={updateBusy}>
+            Ver releases
+          </Button>
+        </div>
+        <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
+          Al aplicar se abre la página o el asset de la release. Debes instalar y reiniciar; la app
+          no se actualiza sola en segundo plano.
+        </p>
+      </div>
+    </Card>
+    </div>
 
     <!-- Environment / danger -->
     <Card
