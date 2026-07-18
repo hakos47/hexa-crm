@@ -1,8 +1,31 @@
 {
   "name": "nix-c",
   "version": "0.1.0",
-  "description": "CRM de tienda local — inventario, ventas, caja, IVA ES e IA con Ollama",
+  "description": "CRM/TPV local-first open source — inventario, ventas, caja, IVA ES e IA con Ollama",
   "type": "module",
+  "private": false,
+  "license": "MIT",
+  "author": "HEXA-NIX contributors",
+  "homepage": "https://github.com/HEXA-NIX/hexa-crm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HEXA-NIX/hexa-crm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HEXA-NIX/hexa-crm/issues"
+  },
+  "keywords": [
+    "pos",
+    "tpv",
+    "crm",
+    "retail",
+    "local-first",
+    "svelte",
+    "tauri",
+    "sqlite",
+    "spain",
+    "open-source"
+  ],
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -16,7 +39,6 @@
     "prepare": "bash scripts/install-git-hooks.sh || true",
     "hooks:install": "bash scripts/install-git-hooks.sh"
   },
-  "license": "MIT",
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
