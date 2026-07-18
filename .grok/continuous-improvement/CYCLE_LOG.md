@@ -1,5 +1,30 @@
 # CYCLE_LOG
 
+## CICLO 4 — 2026-07-18
+
+```
+CICLO 4 — 2026-07-18
+Área auditada: 4+9 — Inventario / importación CSV de productos
+Cambio de mercado relevante y fuentes:
+  - Retail POS: bulk catalog CSV import es onboarding estándar (Square/Lightspeed-like)
+  - Evidencia producto: FEATURE_AUDIT import ausente; solo export ventas/IVA
+Problema seleccionado y evidencia:
+  Alta de catálogo solo manual (modal); sin importación masiva por SKU
+Hipótesis y métrica:
+  CSV con sku,name,price_eur,… → parseProductCsv → upsert por SKU;
+  plantilla + export catálogo round-trip
+Cambios realizados:
+  - src/lib/import/product-csv.ts (parse, aliases ES, template, productsToCsv)
+  - Tests product-csv.test.ts (7)
+  - UI Inventario: Plantilla / Exportar / Importar CSV
+Pruebas: npm test + product-csv; check sin errores de import
+Antes → después: sin import → import/upsert con validación IVA/precio/SKU
+Riesgos: import fila a fila (no transacción batch); errores de fila bloquean todo el archivo
+Elementos aparcados: B5 a11y; B3 % carrito; multi-empresa P0
+Siguiente área candidata: a11y contraste (B5)
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 3 — 2026-07-18
 
 ```

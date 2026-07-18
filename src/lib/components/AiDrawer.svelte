@@ -8,6 +8,7 @@
     expandAiChat,
     collapseAiChat,
   } from "$lib/stores/ui";
+  import { getToken } from "$lib/stores/session";
   import { panelLayoutClasses, isCompact, isFullscreen } from "$lib/ai/popup-state";
   import Button from "./Button.svelte";
   import { marked } from "marked";
@@ -16,6 +17,11 @@
   let input = $state("");
   let loading = $state(false);
   let health = $state<{ ok: boolean; models: string[] } | null>(null);
+
+  // Ajustes de voz (TTS)
+  let voiceEnabled = $state(false);
+  let speechQueue: string[] = [];
+  let currentUtterance: SpeechSynthesisUtterance | null = null;
 
   // Estados de datos de gráficas
   let activeTab = $state<"sales" | "stock" | "cash" | "vat">("sales");
@@ -37,14 +43,12 @@
         .then((h) => (health = h))
         .catch(() => (health = { ok: false, models: [] }));
       
-      // Si se abre en pantalla completa, cargar todas las estadísticas del panel lateral
       if (fullscreen) {
         refreshDashboardData();
       }
     }
   });
 
-  // Escuchar cuando cambia a modo pantalla completa para recargar datos de gráficas
   $effect(() => {
     if (fullscreen) {
       refreshDashboardData();
@@ -72,18 +76,180 @@
     }
   }
 
+  // Helper para parsear la respuesta aislando las etiquetas <think> de razonamiento interno
+  function parseMessageContent(content: string) {
+    const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/);
+    if (thinkMatch) {
+      const thinking = thinkMatch[1].trim();
+      const reply = content.replace(/<think>[\s\S]*?<\/think>/, "").trim();
+      return { thinking, reply };
+    }
+    if (content.includes("<think>")) {
+      const parts = content.split("<think>");
+      const thinking = parts[1] || "";
+      return { thinking, reply: "" };
+    }
+    return { thinking: "", reply: content };
+  }
+
+  // --- SÍNTESIS DE VOZ (TTS) EN TIEMPO REAL ---
+  function cleanMarkdownForSpeech(text: string): string {
+    return text
+      .replace(/[\*\#_`>~\-]/g, "") // Eliminar formato markdown
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Reemplazar links por su texto visible
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function speakText(text: string) {
+    if (!voiceEnabled || typeof window === "undefined" || !window.speechSynthesis) return;
+    const cleaned = cleanMarkdownForSpeech(text);
+    if (!cleaned) return;
+
+    speechQueue.push(cleaned);
+    if (!window.speechSynthesis.speaking) {
+      speakNext();
+    }
+  }
+
+  function speakNext() {
+    if (!voiceEnabled || speechQueue.length === 0 || typeof window === "undefined") return;
+
+    const text = speechQueue.shift();
+    if (!text) return;
+
+    currentUtterance = new SpeechSynthesisUtterance(text);
+    currentUtterance.lang = "es-ES";
+
+    // Cargar voces en español si hay disponibles
+    const voices = window.speechSynthesis.getVoices();
+    const esVoice = voices.find((v) => v.lang.startsWith("es-") || v.lang.startsWith("es_"));
+    if (esVoice) currentUtterance.voice = esVoice;
+
+    currentUtterance.onend = () => {
+      currentUtterance = null;
+      speakNext();
+    };
+
+    currentUtterance.onerror = () => {
+      currentUtterance = null;
+      speakNext();
+    };
+
+    window.speechSynthesis.speak(currentUtterance);
+  }
+
+  function toggleVoice() {
+    voiceEnabled = !voiceEnabled;
+    if (!voiceEnabled) {
+      silenceVoice();
+    }
+  }
+
+  function silenceVoice() {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    speechQueue = [];
+    currentUtterance = null;
+  }
+
+  // --- CONEXIÓN STREAMING DE CHAT DE IA ---
   async function send(text?: string) {
     const content = (text ?? input).trim();
     if (!content || loading) return;
     input = "";
-    messages = [...messages, { role: "user", content }];
+
+    // Cancelar cualquier reproducción de voz previa
+    silenceVoice();
+
+    // Añadir mensaje de usuario y el mensaje vacío inicial del asistente
+    messages = [
+      ...messages,
+      { role: "user", content },
+      { role: "assistant", content: "" }
+    ];
+    
     loading = true;
+    let ttsBuffer = "";
+    let ttsIndex = 0;
+
     try {
-      const res = await api.aiChat(messages);
-      messages = [...messages, { role: "assistant", content: res.reply }];
-      
-      // Auto-enrutamiento de pestaña de gráficas reactiva a lo que hable el usuario
-      const lower = (content + " " + res.reply).toLowerCase();
+      const token = getToken();
+      const response = await fetch("/api/ai/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ messages: messages.slice(0, -1) }), // Excluir el mensaje asistente vacío
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) throw new Error("Cuerpo del stream vacío");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+          
+          try {
+            const parsed = JSON.parse(trimmed.substring(6));
+            const textChunk = parsed.content || "";
+            
+            // Actualizar el texto del asistente en la lista
+            messages[messages.length - 1].content += textChunk;
+            
+            // Procesamiento de voz reactivo
+            const parsedContent = parseMessageContent(messages[messages.length - 1].content);
+            const newReplyText = parsedContent.reply.slice(ttsIndex);
+            
+            if (newReplyText) {
+              ttsBuffer += newReplyText;
+              ttsIndex = parsedContent.reply.length;
+
+              // Buscar oraciones completas en el buffer de voz
+              const sentenceEndRegex = /([^.!?\n]+[.!?\n])/g;
+              let match;
+              let lastIndex = 0;
+              while ((match = sentenceEndRegex.exec(ttsBuffer)) !== null) {
+                const sentence = match[1];
+                speakText(sentence);
+                lastIndex = sentenceEndRegex.lastIndex;
+              }
+              if (lastIndex > 0) {
+                ttsBuffer = ttsBuffer.slice(lastIndex);
+              }
+            }
+          } catch (e) {
+            // Error de parseo de línea individual, ignorar
+          }
+        }
+      }
+
+      // Procesar buffer final si contiene algo
+      if (ttsBuffer.trim()) {
+        speakText(ttsBuffer);
+      }
+
+      // Auto-enrutamiento de pestañas en el panel lateral
+      const finalAssistantContent = messages[messages.length - 1].content;
+      const lower = (content + " " + finalAssistantContent).toLowerCase();
       if (lower.includes("venta") || lower.includes("factura") || lower.includes("ingreso") || lower.includes("ticket")) {
         activeTab = "sales";
       } else if (lower.includes("stock") || lower.includes("inventario") || lower.includes("producto") || lower.includes("existencia")) {
@@ -93,17 +259,17 @@
       } else if (lower.includes("iva") || lower.includes("impuesto") || lower.includes("tasa") || lower.includes("hacienda")) {
         activeTab = "vat";
       }
-      
-      // Refrescar estadísticas en pantalla
+
       if (fullscreen) {
         refreshDashboardData();
       }
+
     } catch (e) {
       messages = [
-        ...messages,
+        ...messages.slice(0, -1), // Quitar el mensaje vacío
         {
           role: "assistant",
-          content: e instanceof Error ? e.message : "Error al consultar la IA",
+          content: e instanceof Error ? e.message : "Error de streaming con la IA",
         },
       ];
     } finally {
@@ -118,7 +284,7 @@
     }
   }
 
-  // Helper para agrupar ventas diarias (últimos 7 días)
+  // Helpers de datos para gráficas (últimos 7 días)
   const salesChartData = $derived.by(() => {
     const dataMap = new Map<string, number>();
     const today = new Date();
@@ -145,7 +311,6 @@
 
   const maxSaleValue = $derived(Math.max(...salesChartData.map((d) => d.value), 10));
 
-  // Top 5 productos stock
   const topProductsStock = $derived(
     [...productsList]
       .sort((a, b) => b.stock - a.stock)
@@ -169,7 +334,7 @@
       ></button>
     {/if}
 
-    <aside
+    <div
       class="glass-strong relative z-10 {layout.panel} overflow-hidden border border-[var(--color-border-strong)] shadow-2xl glow-purple {fullscreen
         ? 'rounded-none sm:rounded-2xl'
         : 'rounded-2xl'}"
@@ -198,7 +363,17 @@
             {/if}
           </p>
         </div>
-        <div class="flex shrink-0 items-center gap-1">
+        <div class="flex shrink-0 items-center gap-1.5">
+          <!-- Botón de control de Voz / Silenciar (TTS) -->
+          <button
+            type="button"
+            class="rounded-lg px-2 py-1 text-xs font-semibold transition border {voiceEnabled ? 'bg-purple-500/20 text-[var(--color-purple-bright)] border-purple-500/30' : 'text-[var(--color-muted)] border-transparent hover:bg-purple-500/10'}"
+            title={voiceEnabled ? "Silenciar asistente de voz" : "Escuchar asistente de voz"}
+            onclick={toggleVoice}
+          >
+            {voiceEnabled ? "🔊 Voz Activa" : "🔇 Voz Silenciada"}
+          </button>
+          
           {#if fullscreen}
             <button
               type="button"
@@ -228,7 +403,7 @@
             title="Cerrar"
             aria-label="Cerrar asistente"
             data-ai-action="close"
-            onclick={() => closeAiChat()}
+            onclick={() => { silenceVoice(); closeAiChat(); }}
           >
             ✕
           </button>
@@ -243,9 +418,9 @@
           <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
             {#if messages.length === 0}
               <div
-                class="rounded-2xl border border-purple-400/20 bg-purple-500/10 p-3 text-sm text-[var(--color-muted)] sm:p-4"
+                class="rounded-2xl border border-purple-400/20 bg-purple-500/10 p-3 text-sm text-[var(--color-muted)] sm:p-4 font-normal"
               >
-                ¡Hola! Soy **Lucía**. Pregúntame sobre ventas, el estado del inventario, saldo de caja o resúmenes de IVA. Responderé usando los datos reales de PostgreSQL 18.
+                ¡Hola! Soy **Lucía**. Pregúntame sobre ventas, stock, caja o IVA. Responderé en streaming en tiempo real y, si activas el botón superior de 🔊, te leeré la respuesta.
               </div>
               <div class="flex flex-wrap gap-2">
                 {#each suggestions as s}
@@ -267,18 +442,33 @@
                   : 'mr-2 border border-[var(--color-border)] bg-black/30 text-[var(--color-text)] sm:mr-4'}"
               >
                 {#if m.role === "assistant"}
-                  {@html marked.parse(m.content)}
+                  {@const parsed = parseMessageContent(m.content)}
+                  {#if parsed.thinking}
+                    <details class="mb-2 rounded-xl border border-purple-900/30 bg-purple-950/20 p-2 text-xs text-[var(--color-muted-dim)]" open>
+                      <summary class="cursor-pointer font-semibold select-none text-[var(--color-muted)] hover:text-radiant-bright transition">
+                        💭 Razonamiento interno (Lucía pensando...)
+                      </summary>
+                      <div class="mt-1.5 pl-2 border-l border-purple-500/20 italic whitespace-pre-wrap">
+                        {parsed.thinking}
+                      </div>
+                    </details>
+                  {/if}
+                  {#if parsed.reply}
+                    {@html marked.parse(parsed.reply)}
+                  {:else if !parsed.thinking}
+                    <span class="text-[var(--color-muted)] italic animate-pulse">Escribiendo respuesta...</span>
+                  {/if}
                 {:else}
                   {m.content}
                 {/if}
               </div>
             {/each}
 
-            {#if loading}
+            {#if loading && messages[messages.length - 1]?.content === ""}
               <div class="mr-2 rounded-2xl border border-[var(--color-border)] bg-black/30 px-3 py-3 sm:mr-4">
                 <div class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-purple-400 animate-pulse"></span>
-                  <span class="text-xs text-[var(--color-muted)]">Lucía está pensando...</span>
+                  <span class="text-xs text-[var(--color-muted)]">Estableciendo conexión con Lucía...</span>
                 </div>
               </div>
             {/if}
@@ -352,7 +542,7 @@
               </button>
             </div>
 
-            <!-- Contenido de las Gráficas (Bento Cards con Glassmorphism) -->
+            <!-- Contenido de las Gráficas -->
             <div class="flex-1 space-y-4">
               
               {#if activeTab === "sales"}
@@ -364,7 +554,6 @@
                       Sin ventas registradas en el periodo actual.
                     </div>
                   {:else}
-                    <!-- Gráfico de barras SVG dinámico -->
                     <div class="h-44 w-full flex items-end justify-between gap-2 pt-6 px-2">
                       {#each salesChartData as item}
                         <div class="flex-1 flex flex-col items-center gap-2 group">
@@ -514,7 +703,7 @@
         {/if}
 
       </div>
-    </aside>
+    </div>
   </div>
 {/if}
 

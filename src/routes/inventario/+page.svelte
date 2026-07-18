@@ -12,17 +12,25 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
   import { showToast } from "$lib/stores/ui";
+  import {
+    parseProductCsv,
+    productCsvTemplate,
+    productsToCsv,
+  } from "$lib/import/product-csv";
+  import { downloadCsv } from "$lib/export/csv";
 
   let products = $state<Product[]>([]);
   let query = $state("");
   let categoryFilter = $state("");
   let loading = $state(true);
+  let importing = $state(false);
   let modalOpen = $state(false);
   let stockModal = $state(false);
   let editing = $state<Product | null>(null);
   let stockTarget = $state<Product | null>(null);
   let stockDelta = $state("1");
   let stockReason = $state("Reposición");
+  let fileInput: HTMLInputElement | undefined = $state();
 
   let form = $state({
     sku: "",
@@ -153,7 +161,70 @@
       showToast(e instanceof Error ? e.message : "Error", "err");
     }
   }
+
+  function downloadTemplate() {
+    downloadCsv("plantilla-productos.csv", productCsvTemplate());
+  }
+
+  function exportCatalog() {
+    downloadCsv(
+      `productos-${new Date().toISOString().slice(0, 10)}.csv`,
+      productsToCsv(products),
+    );
+  }
+
+  function triggerImport() {
+    fileInput?.click();
+  }
+
+  async function onImportFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    importing = true;
+    try {
+      const text = await file.text();
+      const parsed = parseProductCsv(text, products);
+      if (parsed.errors.length && !parsed.rows.length) {
+        showToast(parsed.errors[0]?.message || "CSV no válido", "err");
+        return;
+      }
+      if (parsed.errors.length) {
+        showToast(
+          `${parsed.errors.length} fila(s) con error. Primera: ${parsed.errors[0].message}`,
+          "err",
+        );
+        return;
+      }
+      if (!parsed.rows.length) {
+        showToast("No hay filas de producto en el CSV", "err");
+        return;
+      }
+      let ok = 0;
+      for (const row of parsed.rows) {
+        await api.upsertProduct(row);
+        ok += 1;
+      }
+      showToast(
+        `Importación OK: ${ok} producto(s) (${parsed.would_create} nuevos, ${parsed.would_update} actualizados)`,
+      );
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al importar", "err");
+    } finally {
+      importing = false;
+    }
+  }
 </script>
+
+<input
+  bind:this={fileInput}
+  type="file"
+  accept=".csv,text/csv"
+  class="hidden"
+  onchange={onImportFile}
+/>
 
 <div class="mb-4 flex flex-wrap items-center gap-3">
   <input
@@ -170,7 +241,18 @@
       ...categories.map((c) => ({ value: c, label: c })),
     ]}
   />
-  <Button class="ml-auto" onclick={openCreate}>+ Nuevo producto</Button>
+  <div class="ml-auto flex flex-wrap gap-2">
+    <Button variant="secondary" onclick={downloadTemplate} disabled={importing}>
+      Plantilla CSV
+    </Button>
+    <Button variant="secondary" onclick={exportCatalog} disabled={importing || !products.length}>
+      Exportar CSV
+    </Button>
+    <Button variant="secondary" onclick={triggerImport} disabled={importing}>
+      {importing ? "Importando…" : "Importar CSV"}
+    </Button>
+    <Button onclick={openCreate}>+ Nuevo producto</Button>
+  </div>
 </div>
 
 {#if loading}
