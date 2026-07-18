@@ -1,19 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
-  import type { VatBucket, VatSummary } from "$lib/types";
+  import type { VatSummary } from "$lib/types";
   import { formatEUR } from "$lib/money";
   import { vatLabel, type VatRate } from "$lib/vat";
   import Card from "$lib/components/Card.svelte";
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import Button from "$lib/components/Button.svelte";
-  import SortableHeader from "$lib/components/SortableHeader.svelte";
   import { showToast } from "$lib/stores/ui";
   import { downloadCsv, vatSummaryToCsv } from "$lib/export/csv";
-  import { nextSortDirection, sortRows, type SortDirection } from "$lib/table-sort";
-
-  type VatSortKey = "rate" | "base" | "vat" | "total";
 
   function monthRange(d = new Date()) {
     const y = d.getFullYear();
@@ -27,22 +23,6 @@
   let range = $state(monthRange());
   let summary = $state<VatSummary | null>(null);
   let loading = $state(true);
-  let vatSortKey = $state<VatSortKey>("rate");
-  let vatSortDirection = $state<SortDirection>("asc");
-
-  const sortedBuckets = $derived(
-    sortRows(summary?.buckets ?? [], vatSortDirection, (bucket: VatBucket) => {
-      if (vatSortKey === "rate") return bucket.vat_rate;
-      if (vatSortKey === "base") return bucket.base_cents;
-      if (vatSortKey === "vat") return bucket.vat_cents;
-      return bucket.total_cents;
-    })
-  );
-
-  function sortVatBy(key: VatSortKey) {
-    vatSortDirection = nextSortDirection(vatSortKey, key, vatSortDirection);
-    vatSortKey = key;
-  }
 
   async function load() {
     loading = true;
@@ -104,14 +84,14 @@
     <table class="w-full text-left text-sm">
       <thead class="border-b border-white/10 text-xs uppercase text-slate-500">
         <tr>
-          <SortableHeader label="Tipo" active={vatSortKey === "rate"} direction={vatSortDirection} class="px-4 py-2" onclick={() => sortVatBy("rate")} />
-          <SortableHeader label="Base" active={vatSortKey === "base"} direction={vatSortDirection} class="px-4 py-2" onclick={() => sortVatBy("base")} />
-          <SortableHeader label="Cuota" active={vatSortKey === "vat"} direction={vatSortDirection} class="px-4 py-2" onclick={() => sortVatBy("vat")} />
-          <SortableHeader label="Total" active={vatSortKey === "total"} direction={vatSortDirection} class="px-4 py-2" onclick={() => sortVatBy("total")} />
+          <th class="px-4 py-3">Tipo</th>
+          <th class="px-4 py-3">Base</th>
+          <th class="px-4 py-3">Cuota</th>
+          <th class="px-4 py-3">Total</th>
         </tr>
       </thead>
       <tbody>
-        {#each sortedBuckets as b}
+        {#each summary.buckets as b}
           <tr class="border-b border-white/5">
             <td class="px-4 py-3">
               <Badge tone="vat">{vatLabel(b.vat_rate as VatRate)}</Badge>
