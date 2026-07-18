@@ -9,13 +9,9 @@
   import Badge from "$lib/components/Badge.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
-  import SortableHeader from "$lib/components/SortableHeader.svelte";
   import { showToast } from "$lib/stores/ui";
   import { resolveQuickAdd } from "$lib/pos/quick-add";
   import { downloadCsv, salesToCsv } from "$lib/export/csv";
-  import { nextSortDirection, sortRows, type SortDirection } from "$lib/table-sort";
-
-  type SaleSortKey = "number" | "date" | "total";
 
   let products = $state<Product[]>([]);
   let customers = $state<Customer[]>([]);
@@ -28,8 +24,6 @@
   let loading = $state(true);
   let submitting = $state(false);
   let selectedSale = $state<Sale | null>(null);
-  let saleSortKey = $state<SaleSortKey>("date");
-  let saleSortDirection = $state<SortDirection>("desc");
 
   const filteredProducts = $derived(
     products.filter(
@@ -50,18 +44,6 @@
   );
 
   const totals = $derived(saleTotals(cartLines));
-  const sortedSales = $derived(
-    sortRows(sales, saleSortDirection, (sale) => {
-      if (saleSortKey === "number") return sale.number;
-      if (saleSortKey === "total") return sale.total_cents;
-      return new Date(sale.sold_at).getTime();
-    })
-  );
-
-  function sortSalesBy(key: SaleSortKey) {
-    saleSortDirection = nextSortDirection(saleSortKey, key, saleSortDirection);
-    saleSortKey = key;
-  }
 
   async function load() {
     loading = true;
@@ -290,14 +272,14 @@
           <table class="w-full min-w-[28rem] text-left text-sm">
             <thead class="border-b border-[var(--color-border)] text-xs uppercase text-[var(--color-muted-dim)]">
               <tr>
-                <SortableHeader label="Ticket" active={saleSortKey === "number"} direction={saleSortDirection} class="px-3 py-2 sm:px-4" onclick={() => sortSalesBy("number")} />
-                <SortableHeader label="Fecha" active={saleSortKey === "date"} direction={saleSortDirection} class="px-3 py-2 sm:px-4" onclick={() => sortSalesBy("date")} />
-                <SortableHeader label="Total" active={saleSortKey === "total"} direction={saleSortDirection} class="px-3 py-2 sm:px-4" onclick={() => sortSalesBy("total")} />
+                <th class="px-3 py-3 sm:px-4">Ticket</th>
+                <th class="px-3 py-3 sm:px-4">Fecha</th>
+                <th class="px-3 py-3 sm:px-4">Total</th>
                 <th class="px-3 py-3 sm:px-4"></th>
               </tr>
             </thead>
             <tbody>
-              {#each sortedSales as s}
+              {#each sales as s}
                 <tr class="border-b border-white/5 hover:bg-purple-500/[0.05]">
                   <td class="px-3 py-3 font-medium sm:px-4">{s.number}</td>
                   <td class="px-3 py-3 text-[var(--color-muted)] sm:px-4">
