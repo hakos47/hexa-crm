@@ -9,10 +9,22 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### Added
+- Shell: accesos rápidos con deep-link `?nuevo=1` (producto, cliente, caja, TPV) (#12).
+- **Onboarding guiado** 1ª sesión: tienda → producto → CTA primera venta; se puede saltar (#11).
+- **Cobertura de stock** (~días a ritmo de 14 d) en inventario y alertas del dashboard (#22).
+
+### Changed
+- **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).
+- Navegación en **español de comercio** (#12).
+- Naming comercial **Hexa** + tagline «Asistente de tienda · IA local opcional» en login/shell (#23). Package npm sigue `hexa-crm`.
+
 ### Pendiente / backlog
-- Settings por empresa (multi-empresa M1b)
-- Parity Tauri de `return_sale_lines`
-- Instaladores nativos (AppImage/deb/msi) en CI
+- Dashboard de mando completo (#13) y copiloto IA con tools (#14)
+- CRM valor cliente (#17), TPV favoritos (#15), reposición sugerida (#16)
+- Settings por empresa (M1b); Parity Tauri returns (#24)
+- Design system light (#18); idle timeout (#21)
+
 
 ---
 

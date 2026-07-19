@@ -3,7 +3,13 @@
  * Drives real shipped modules (backup validate, store keys, product constants).
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { PRODUCT_NAME, PRODUCT_TITLE, PRODUCT_UPDATE_UA } from "./product";
+import {
+  PRODUCT_NAME,
+  PRODUCT_DISPLAY_NAME,
+  PRODUCT_TITLE,
+  PRODUCT_TAGLINE,
+  PRODUCT_UPDATE_UA,
+} from "./product";
 import {
   BACKUP_FORMAT,
   LEGACY_BACKUP_FORMAT,
@@ -49,9 +55,11 @@ function installLocalStoragePolyfill() {
 }
 
 describe("product branding", () => {
-  it("exports canonical hexa-crm product identity", () => {
+  it("exports canonical hexa-crm package identity + commercial display", () => {
     expect(PRODUCT_NAME).toBe("hexa-crm");
-    expect(PRODUCT_TITLE).toContain("hexa-crm");
+    expect(PRODUCT_DISPLAY_NAME).toBe("Hexa");
+    expect(PRODUCT_TITLE).toMatch(/Hexa|hexa/i);
+    expect(PRODUCT_TAGLINE.toLowerCase()).toMatch(/tienda|ia local/);
     expect(PRODUCT_UPDATE_UA.toLowerCase()).toContain("hexa");
     expect(PRODUCT_NAME).not.toMatch(/nix/i);
   });

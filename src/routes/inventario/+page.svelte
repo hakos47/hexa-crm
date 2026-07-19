@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/stores";
   import { api } from "$lib/api/client";
   import type { Product, ProductInput } from "$lib/types";
   import { formatEUR, parseEurosInput } from "$lib/money";
@@ -18,8 +19,12 @@
     productsToCsv,
   } from "$lib/import/product-csv";
   import { downloadCsv } from "$lib/export/csv";
+  import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
+  import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
 
   let products = $state<Product[]>([]);
+  /** product_id → units sold (net) last 14 days */
+  let sold14d = $state<Record<number, number>>({});
   let query = $state("");
   let categoryFilter = $state("");
   let loading = $state(true);
@@ -63,10 +68,58 @@
     })
   );
 
+  const HORIZON_DAYS = 14;
+
+  async function loadSoldMap() {
+    try {
+      const sales = await api.listSales();
+      const cutoff = Date.now() - HORIZON_DAYS * 86400000;
+      const recent = sales
+        .filter(
+          (s) =>
+            countsInBusinessTotals(s.status) && new Date(s.sold_at).getTime() >= cutoff,
+        )
+        .slice(0, 80);
+      const lines: { product_id: number; qty: number; returned_qty?: number }[] = [];
+      for (const s of recent) {
+        try {
+          const detail = await api.getSale(s.id);
+          if (detail.lines) {
+            for (const l of detail.lines) {
+              lines.push({
+                product_id: l.product_id,
+                qty: l.qty,
+                returned_qty: l.returned_qty,
+              });
+            }
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      const map: Record<number, number> = {};
+      for (const p of products) {
+        map[p.id] = qtySoldForProduct(lines, p.id);
+      }
+      sold14d = map;
+    } catch {
+      sold14d = {};
+    }
+  }
+
+  function coverFor(p: Product) {
+    return estimateDaysOfCover({
+      stock: p.stock,
+      qtySoldInHorizon: sold14d[p.id] ?? 0,
+      horizonDays: HORIZON_DAYS,
+    });
+  }
+
   async function load() {
     loading = true;
     try {
       products = await api.listProducts(false);
+      await loadSoldMap();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
     } finally {
@@ -74,7 +127,12 @@
     }
   }
 
-  onMount(load);
+  onMount(async () => {
+    await load();
+    if ($page.url.searchParams.get("nuevo") === "1") {
+      openCreate();
+    }
+  });
 
   function openCreate() {
     editing = null;
@@ -270,6 +328,7 @@
             <th class="px-4 py-3 font-medium">Producto</th>
             <th class="px-4 py-3 font-medium">Categoría</th>
             <th class="px-4 py-3 font-medium">Stock</th>
+            <th class="px-4 py-3 font-medium">Cobertura</th>
             <th class="px-4 py-3 font-medium">PVP</th>
             <th class="px-4 py-3 font-medium">IVA</th>
             <th class="px-4 py-3 font-medium">Coste</th>
@@ -278,6 +337,7 @@
         </thead>
         <tbody>
           {#each filtered as p}
+            {@const cover = coverFor(p)}
             <tr class="border-b border-white/5 transition hover:bg-white/[0.03]">
               <td class="px-4 py-3">
                 <p class="font-medium text-slate-100">{p.name}</p>
@@ -295,6 +355,18 @@
                     <Badge tone="warn">bajo</Badge>
                   {/if}
                 </div>
+              </td>
+              <td class="px-4 py-3 text-xs">
+                <span
+                  class="tabular {cover.label === 'critical'
+                    ? 'text-rose-300'
+                    : cover.label === 'watch'
+                      ? 'text-amber-200'
+                      : 'text-[var(--color-muted-dim)]'}"
+                  title="Estimación a ritmo de ventas de los últimos {HORIZON_DAYS} días"
+                >
+                  {cover.display}
+                </span>
               </td>
               <td class="px-4 py-3 tabular">{formatEUR(p.price_cents)}</td>
               <td class="px-4 py-3">

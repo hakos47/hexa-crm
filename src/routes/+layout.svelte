@@ -7,6 +7,7 @@
   import Button from "$lib/components/Button.svelte";
   import LoginScreen from "$lib/components/LoginScreen.svelte";
   import ForcePasswordChange from "$lib/components/ForcePasswordChange.svelte";
+  import OnboardingWizard from "$lib/components/OnboardingWizard.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import { openAiChat } from "$lib/stores/ui";
   import {
@@ -21,10 +22,13 @@
   import { api } from "$lib/api/client";
   import { page } from "$app/stores";
   import { showToast } from "$lib/stores/ui";
+  import { isOnboardingDone } from "$lib/onboarding/state";
+  import { PRODUCT_DISPLAY_NAME } from "$lib/product";
 
   let { children } = $props();
   let mobileNavOpen = $state(false);
   let switchingCompany = $state(false);
+  let showOnboarding = $state(false);
 
   const titles: Record<string, { title: string; subtitle: string }> = {
     "/": {
@@ -58,7 +62,7 @@
   };
 
   function metaFor(path: string) {
-    return titles[path] ?? { title: "hexa-crm", subtitle: "" };
+    return titles[path] ?? { title: PRODUCT_DISPLAY_NAME, subtitle: "" };
   }
 
   const canEnter = $derived(
@@ -101,13 +105,28 @@
     }
   });
 
-  async function lock() {
+  // First-run wizard when session becomes valid (issue #11)
+  $effect(() => {
+    if (canEnter && !$mustChangePassword) {
+      try {
+        showOnboarding = !isOnboardingDone();
+      } catch {
+        showOnboarding = false;
+      }
+    } else {
+      showOnboarding = false;
+    }
+  });
+
+  /** Cerrar sesión: API logout best-effort + limpia store (issue #9). */
+  async function closeSession() {
     try {
       await api.logout();
     } catch {
-      /* ignore */
+      /* ignore network/session errors — still clear local state */
     }
     clearSession();
+    showToast("Sesión cerrada");
   }
 
   async function onCompanyChange(e: Event) {
@@ -148,7 +167,7 @@
   <div class="flex h-dvh max-h-dvh overflow-hidden">
     <!-- Desktop sidebar -->
     <div class="hidden h-full shrink-0 md:flex">
-      <Sidebar />
+      <Sidebar onLogout={closeSession} />
     </div>
 
     <!-- Mobile drawer -->
@@ -160,7 +179,11 @@
           onclick={() => (mobileNavOpen = false)}
         ></button>
         <div class="absolute inset-y-0 left-0 z-10 flex h-full w-[min(18rem,88vw)] shadow-2xl">
-          <Sidebar forceExpanded onNavigate={() => (mobileNavOpen = false)} />
+          <Sidebar
+            forceExpanded
+            onNavigate={() => (mobileNavOpen = false)}
+            onLogout={closeSession}
+          />
         </div>
       </div>
     {/if}
@@ -219,8 +242,15 @@
             </p>
             <p class="text-[11px] capitalize text-radiant">{$session.user?.role}</p>
           </div>
-          <Button variant="secondary" class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm" onclick={lock}>
-            🔒<span class="hidden sm:inline"> Bloquear</span>
+          <Button
+            variant="secondary"
+            class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"
+            onclick={closeSession}
+            data-logout
+            aria-label="Cerrar sesión"
+          >
+            <span class="sm:hidden" aria-hidden="true">⎋</span>
+            <span class="hidden sm:inline">Cerrar sesión</span>
           </Button>
           <Button
             variant="ai"
@@ -241,4 +271,7 @@
 
   <AiDrawer />
   <Toast />
+  {#if showOnboarding && !$mustChangePassword}
+    <OnboardingWizard onComplete={() => (showOnboarding = false)} />
+  {/if}
 {/if}

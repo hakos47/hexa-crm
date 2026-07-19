@@ -1,5 +1,27 @@
 # CYCLE_LOG
 
+## CICLO 10 — 2026-07-19
+
+```
+CICLO 10 — 2026-07-19
+Área auditada: 11+13 — Sesión (Cerrar sesión) + UX shell español (#9, #12)
+Cambio de mercado / evidencia:
+  - Issues GitHub #9 #12 (Retail OS oleada A)
+  - Evidencia producto: solo «Bloquear»; Sidebar «Navigation/Quick actions»
+Problema: no se entiende cómo salir/cambiar usuario; jerga EN en nav
+Hipótesis: label Cerrar sesión + sidebar logout + nav ES + ?nuevo=1
+Cambios:
+  - +layout closeSession + data-logout + toast
+  - Sidebar ES, onLogout, quick links create
+  - inventario/clientes/caja/ventas abren create con ?nuevo=1
+  - Dashboard Resumen; session-ui tests
+Pruebas: 145/145 (baseline 141 → +4)
+Antes → después: Bloquear confuso → Cerrar sesión; nav EN → ES de comercio
+Riesgos: query ?nuevo=1 no limpia URL (cosmético)
+Siguiente: onboarding #11 o dashboard #13
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 9 — 2026-07-19
 
 ```

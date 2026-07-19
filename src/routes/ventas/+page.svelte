@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/stores";
   import { api } from "$lib/api/client";
   import type { Customer, Product, Sale, SaleLineInput } from "$lib/types";
   import { formatEUR, parseEurosInput } from "$lib/money";
@@ -80,7 +81,13 @@
     }
   }
 
-  onMount(load);
+  onMount(async () => {
+    await load();
+    // Acceso rápido "Nueva venta": forzar pestaña TPV
+    if ($page.url.searchParams.get("nuevo") === "1") {
+      tab = "tpv";
+    }
+  });
 
   function addToCart(p: Product) {
     const existing = cart.find((c) => c.product.id === p.id);

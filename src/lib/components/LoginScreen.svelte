@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api/client";
   import { setSession } from "$lib/stores/session";
+  import { PRODUCT_DISPLAY_NAME, PRODUCT_TAGLINE } from "$lib/product";
   import Button from "./Button.svelte";
   import Logo from "./Logo.svelte";
 
@@ -8,7 +9,7 @@
   let password = $state("");
   let error = $state("");
   let loading = $state(false);
-  let shopName = $state("hexa-crm");
+  let shopName = $state(PRODUCT_DISPLAY_NAME);
 
   let userInputEl: HTMLInputElement | undefined = $state();
 
@@ -16,7 +17,7 @@
     api
       .publicMeta()
       .then((s) => {
-        shopName = s.shop_name || "hexa-crm";
+        shopName = s.shop_name || PRODUCT_DISPLAY_NAME;
       })
       .catch(() => {});
   });
@@ -67,7 +68,10 @@
       <h1 class="text-xl font-semibold tracking-tight text-[var(--color-text)] sm:text-2xl">
         {shopName}
       </h1>
-      <p class="mt-1 text-sm text-[var(--color-muted)]">Acceso restringido · Usuario y contraseña</p>
+      <p class="mt-1 text-sm text-[var(--color-muted)]">{PRODUCT_TAGLINE}</p>
+      <p class="mt-0.5 text-xs text-[var(--color-muted-dim)]">
+        Datos locales · Sin nube obligatoria · {PRODUCT_DISPLAY_NAME}
+      </p>
     </div>
 
     <form class="grid gap-4" onsubmit={submit}>

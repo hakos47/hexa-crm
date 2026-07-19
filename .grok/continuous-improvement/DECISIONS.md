@@ -14,3 +14,5 @@
 | 2026-07-19 C8 | IVA dashboard netea por remainingLineAmounts | Dejar IVA bruto del ticket | Evita sobre-declarar base/IVA tras devoluciones |
 | 2026-07-19 C9 | Arqueo: sobrante→adjustment, faltante→expense categoría arqueo | Solo nota sin movimiento | Alinea saldo sistema con contado físico |
 | 2026-07-19 C9 | Cierre día: ventas display netas; net_cash usa bruto − gastos (incl. devoluciones) | Netear ventas y restar gastos de nuevo | Evita doble resta de reembolsos |
+| 2026-07-19 C10 | «Cerrar sesión» (no Bloquear) en header+sidebar; toast al salir | Solo candado / idle lock futuro | Issue #9: cambio de usuario y recovery de sesión |
+| 2026-07-19 C10 | Accesos rápidos con `?nuevo=1` | Solo href al listado | Issue #12: inicia la tarea de creación |

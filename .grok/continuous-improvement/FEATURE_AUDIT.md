@@ -13,3 +13,4 @@
 | Multi-empresa | ciclo 7 | ok slice | settings mono | company-isolation |
 | Ajustes UI | ciclo 5 + reorg | ok | — | ajustes-layout |
 | Clientes | ciclo 0 | basico | sin historial compras | — |
+| **Shell sesión / nav ES** | **ciclo 10** | **ok** | onboarding aún no | session-ui.test |

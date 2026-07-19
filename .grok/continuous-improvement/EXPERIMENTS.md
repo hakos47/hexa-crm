@@ -8,3 +8,4 @@
 | E4 | Import CSV productos con upsert por SKU | Solo alta manual | parse ok + round-trip export | **OK ciclo 4** 7 tests + UI | Adoptado |
 | E5 | Devolución parcial por línea con returned_qty | Solo cancel total | stock+caja+IVA net | **OK ciclo 8** 132 tests | Adoptado (web/browser) |
 | E6 | Arqueo contado vs saldo sistema + ajuste | Solo KPI saldo | descuadre + movimiento | **OK ciclo 9** 141 tests | Adoptado |
+| E7 | Cerrar sesión label + nav ES + ?nuevo=1 | Bloquear + Navigation EN | logout usable + create deep-links | **OK ciclo 10** 145 tests | Adoptado |

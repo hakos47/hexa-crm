@@ -7,14 +7,50 @@
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
+  import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
+  import { isOnboardingDone } from "$lib/onboarding/state";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
+  let sold14d = $state<Record<number, number>>({});
   let loading = $state(true);
+  let onboardingPending = $state(false);
 
   onMount(async () => {
     try {
+      onboardingPending = !isOnboardingDone();
       [stats, sales] = await Promise.all([api.dashboardStats(), api.listSales()]);
+      // Build sold map for low-stock cover hints (last 14d, cap fetches)
+      const cutoff = Date.now() - 14 * 86400000;
+      const recentSales = sales
+        .filter(
+          (s) =>
+            countsInBusinessTotals(s.status) && new Date(s.sold_at).getTime() >= cutoff,
+        )
+        .slice(0, 40);
+      const lines: { product_id: number; qty: number; returned_qty?: number }[] = [];
+      for (const s of recentSales) {
+        try {
+          const d = await api.getSale(s.id);
+          if (d.lines) {
+            for (const l of d.lines) {
+              lines.push({
+                product_id: l.product_id,
+                qty: l.qty,
+                returned_qty: l.returned_qty,
+              });
+            }
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      const map: Record<number, number> = {};
+      for (const p of stats?.low_stock ?? []) {
+        map[p.id] = qtySoldForProduct(lines, p.id);
+      }
+      sold14d = map;
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error al cargar", "err");
     } finally {
@@ -32,8 +68,20 @@
     {/each}
   </div>
 {:else if stats}
-  <!-- Overview KPIs — reference CRM style -->
-  <p class="section-label mb-3">Overview</p>
+  {#if onboardingPending}
+    <Card class="mb-4 border border-purple-400/30 bg-purple-500/10" lift={false} data-onboarding-hint>
+      <p class="text-sm font-medium text-[var(--color-purple-bright)]">Puesta en marcha pendiente</p>
+      <p class="mt-1 text-xs text-[var(--color-muted)]">
+        Completa el asistente inicial o ve a Ajustes para nombrar la tienda. Luego cobra tu primera
+        venta en el TPV.
+      </p>
+      <a href="/ventas?nuevo=1" class="mt-2 inline-block text-sm text-radiant hover:underline">
+        Ir a cobrar →
+      </a>
+    </Card>
+  {/if}
+  <!-- Resumen KPIs -->
+  <p class="section-label mb-3">Resumen</p>
   <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <KpiCard
       label="Ventas hoy"
@@ -79,6 +127,11 @@
       {:else}
         <ul class="space-y-2">
           {#each stats.low_stock as p}
+            {@const cover = estimateDaysOfCover({
+              stock: p.stock,
+              qtySoldInHorizon: sold14d[p.id] ?? 0,
+              horizonDays: 14,
+            })}
             <li>
               <a
                 href="/inventario"
@@ -92,7 +145,9 @@
                 </div>
                 <div class="text-right">
                   <p class="tabular text-sm text-rose-300">{p.stock}</p>
-                  <p class="text-[10px] text-[var(--color-muted-dim)]">mín {p.min_stock}</p>
+                  <p class="text-[10px] text-[var(--color-muted-dim)]">
+                    mín {p.min_stock} · {cover.display}
+                  </p>
                 </div>
               </a>
             </li>
@@ -140,7 +195,7 @@
       <h2 class="section-label mb-4 !normal-case !tracking-wide !text-sm">Acciones rápidas</h2>
       <div class="grid gap-2">
         <a
-          href="/ventas"
+          href="/ventas?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">◎</span>
@@ -152,23 +207,23 @@
           </div>
         </a>
         <a
-          href="/inventario"
+          href="/inventario?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">▣</span>
           <div>
-            <p class="text-sm font-medium text-[var(--color-text)]">Inventario</p>
-            <p class="text-[11px] text-[var(--color-muted-dim)]">Stock y productos</p>
+            <p class="text-sm font-medium text-[var(--color-text)]">Nuevo producto</p>
+            <p class="text-[11px] text-[var(--color-muted-dim)]">Alta rápida de stock</p>
           </div>
         </a>
         <a
-          href="/caja"
+          href="/caja?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">€</span>
           <div>
-            <p class="text-sm font-medium text-[var(--color-text)]">Caja</p>
-            <p class="text-[11px] text-[var(--color-muted-dim)]">Presupuesto actual</p>
+            <p class="text-sm font-medium text-[var(--color-text)]">Movimiento de caja</p>
+            <p class="text-[11px] text-[var(--color-muted-dim)]">Gasto o ingreso manual</p>
           </div>
         </a>
         <a

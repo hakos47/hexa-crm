@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/stores";
   import { api } from "$lib/api/client";
   import type { CashKind, CashMovement, Sale } from "$lib/types";
   import { formatEUR, parseEurosInput } from "$lib/money";
@@ -57,7 +58,12 @@
     }
   }
 
-  onMount(load);
+  onMount(async () => {
+    await load();
+    if ($page.url.searchParams.get("nuevo") === "1") {
+      open = true;
+    }
+  });
 
   const dayClose = $derived(
     buildDailyCloseReport(
