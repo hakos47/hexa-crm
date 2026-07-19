@@ -5,6 +5,7 @@ import type {
   AuthUser,
   CashInput,
   CashMovement,
+  Company,
   CreateUserResult,
   Customer,
   CustomerInput,
@@ -131,5 +132,19 @@ export const api = {
   preMigrationBackup: (reason: string) =>
     call<unknown>("pre_migration_backup", { reason }),
   restoreBackup: (raw: unknown) => call<void>("restore_backup", { raw }),
+  listCompanies: () => call<Company[]>("list_companies"),
+  getActiveCompany: () => call<Company | null>("get_active_company"),
+  setActiveCompany: (companyId: number) =>
+    call<Company>("set_active_company", { company_id: companyId }),
+  billingByCompany: () =>
+    call<
+      {
+        company_id: number;
+        code: string;
+        trade_name: string;
+        sales_count: number;
+        total_cents: number;
+      }[]
+    >("billing_by_company"),
   isTauri,
 };

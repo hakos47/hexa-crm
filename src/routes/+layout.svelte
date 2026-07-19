@@ -13,14 +13,18 @@
     session,
     clearSession,
     setSession,
+    setActiveCompanyLocal,
     markSessionReady,
     mustChangePassword,
+    activeCompany,
   } from "$lib/stores/session";
   import { api } from "$lib/api/client";
   import { page } from "$app/stores";
+  import { showToast } from "$lib/stores/ui";
 
   let { children } = $props();
   let mobileNavOpen = $state(false);
+  let switchingCompany = $state(false);
 
   const titles: Record<string, { title: string; subtitle: string }> = {
     "/": {
@@ -77,7 +81,16 @@
     try {
       const me = await api.sessionMe();
       if (me) {
-        setSession(me, token);
+        let companies = $session.companies;
+        let activeCompanyId = $session.activeCompanyId;
+        try {
+          companies = await api.listCompanies();
+          const active = await api.getActiveCompany();
+          activeCompanyId = active?.id ?? companies[0]?.id ?? null;
+        } catch {
+          /* company API optional on older backends */
+        }
+        setSession(me, token, { companies, activeCompanyId });
       } else {
         clearSession();
       }
@@ -95,6 +108,23 @@
       /* ignore */
     }
     clearSession();
+  }
+
+  async function onCompanyChange(e: Event) {
+    const id = Number((e.target as HTMLSelectElement).value);
+    if (!id || switchingCompany) return;
+    switchingCompany = true;
+    try {
+      const c = await api.setActiveCompany(id);
+      setActiveCompanyLocal(c);
+      showToast(`Empresa activa: ${c.trade_name}`);
+      // Reload current route data
+      if (typeof window !== "undefined") window.location.reload();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "No se pudo cambiar de empresa", "err");
+    } finally {
+      switchingCompany = false;
+    }
   }
 </script>
 
@@ -160,6 +190,29 @@
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          {#if $session.companies.length > 1}
+            <label class="hidden min-w-0 flex-col text-[10px] text-[var(--color-muted-dim)] sm:flex">
+              Empresa
+              <select
+                class="field mt-0.5 max-w-[10rem] py-1 text-xs"
+                value={String($session.activeCompanyId ?? "")}
+                disabled={switchingCompany}
+                onchange={onCompanyChange}
+                data-company-switcher
+              >
+                {#each $session.companies as c}
+                  <option value={String(c.id)}>{c.code} · {c.trade_name}</option>
+                {/each}
+              </select>
+            </label>
+          {:else if $activeCompany}
+            <span
+              class="hidden rounded-full border border-purple-400/30 bg-purple-500/10 px-2.5 py-1 text-[11px] font-medium text-[var(--color-purple-bright)] sm:inline"
+              title={$activeCompany.legal_name}
+            >
+              {$activeCompany.code}
+            </span>
+          {/if}
           <div class="mr-0 hidden text-right lg:block">
             <p class="text-sm font-medium text-[var(--color-text)]">
               {$session.user?.display_name}

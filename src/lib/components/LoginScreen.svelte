@@ -36,7 +36,10 @@
     loading = true;
     try {
       const res = await api.login(username.trim(), password.trim());
-      setSession(res.user, res.token);
+      setSession(res.user, res.token, {
+        companies: res.companies ?? [],
+        activeCompanyId: res.active_company_id ?? null,
+      });
     } catch (err) {
       error = err instanceof Error ? err.message : "No se pudo iniciar sesión";
       password = "";

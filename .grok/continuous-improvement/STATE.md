@@ -1,9 +1,9 @@
 # STATE
 
-- Ciclo: **6**
-- Fecha cierre: 2026-07-18T21:10
+- Ciclo: **7**
+- Fecha cierre: 2026-07-19T09:36
 - Estado: **CYCLE_COMPLETE**
-- Área auditada: **5 — Ventas/TPV** (descuento % carrito global)
+- Área auditada: **multi-empresa P0 slice** (Company Tenant)
 - Bloqueos: ninguno
-- Siguiente área candidata: **M1 multi-empresa P0** o devolución parcial
-- Rama: `feat/ci-cycle-6` → merge a `dev`
+- Siguiente área candidata: **billing UI consolidado** o **devolución parcial**
+- Rama: `feat/ci-cycle-7` → merge a `dev`

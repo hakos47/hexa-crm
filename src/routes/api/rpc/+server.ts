@@ -47,6 +47,18 @@ export const POST: RequestHandler = async ({ request }) => {
       case "session_me":
         result = await postgresApi.session_me(token);
         break;
+      case "list_companies":
+        result = await postgresApi.list_companies(token);
+        break;
+      case "get_active_company":
+        result = await postgresApi.get_active_company(token);
+        break;
+      case "set_active_company":
+        result = await postgresApi.set_active_company(args?.company_id as number, token);
+        break;
+      case "billing_by_company":
+        result = await postgresApi.billing_by_company(token);
+        break;
       case "list_users":
         result = await postgresApi.list_users(token);
         break;

@@ -22,6 +22,7 @@ import type {
   AuthUser,
   CashInput,
   CashMovement,
+  Company,
   CreateUserResult,
   Customer,
   CustomerInput,
@@ -35,6 +36,14 @@ import type {
   UserInput,
   VatSummary,
 } from "../types";
+import {
+  billingByCompany,
+  canAccessCompany,
+  companiesForUser,
+  pickDefaultCompanyId,
+  seedCompanies,
+  seedCompanyMembers,
+} from "../company/context";
 
 // Prefer Vite/SvelteKit private env; fall back to process.env and local Docker defaults.
 function resolveDatabaseUrl(): string {
@@ -76,6 +85,27 @@ function toIso(d: Date | string | null | undefined): string {
 export async function initDb() {
   // Asegurar extensión pgvector
   await sql`CREATE EXTENSION IF NOT EXISTS vector`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS companies (
+      id SERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      legal_name TEXT NOT NULL,
+      trade_name TEXT NOT NULL,
+      nif TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'generic',
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS company_members (
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL DEFAULT 'cajero',
+      PRIMARY KEY (company_id, user_id)
+    );
+  `;
 
   // Crear tablas
   await sql`
@@ -190,10 +220,88 @@ export async function initDb() {
     );
   `;
 
+  // Multi-empresa columns (idempotent)
+  await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS active_company_id INTEGER`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+  await sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+
   // Seeders
   await seedSettings();
   await seedUsers();
+  await seedCompaniesPg();
   await seedProductsAndCustomers();
+}
+
+async function seedCompaniesPg() {
+  const count = await sql`SELECT COUNT(*)::int as count FROM companies`;
+  if (count[0].count > 0) {
+    await ensureDefaultMembers();
+    return;
+  }
+  const t = new Date().toISOString();
+  for (const c of seedCompanies(t)) {
+    await sql`
+      INSERT INTO companies (id, code, legal_name, trade_name, nif, kind, active, created_at)
+      VALUES (${c.id}, ${c.code}, ${c.legal_name}, ${c.trade_name}, ${c.nif}, ${c.kind}, ${c.active}, ${c.created_at})
+      ON CONFLICT (id) DO NOTHING
+    `;
+  }
+  // Keep serial in sync
+  await sql`SELECT setval(pg_get_serial_sequence('companies','id'), (SELECT COALESCE(MAX(id),1) FROM companies))`;
+  await ensureDefaultMembers();
+}
+
+async function ensureDefaultMembers() {
+  const users = await sql`SELECT id, username FROM users ORDER BY id ASC`;
+  if (users.length === 0) return;
+  const admin = users.find((u) => u.username === "admin") ?? users[0];
+  const cajero = users.find((u) => u.username === "cajero") ?? admin;
+  const members = seedCompanyMembers({ adminId: admin.id, cajeroId: cajero.id });
+  for (const m of members) {
+    await sql`
+      INSERT INTO company_members (company_id, user_id, role)
+      VALUES (${m.company_id}, ${m.user_id}, ${m.role})
+      ON CONFLICT (company_id, user_id) DO NOTHING
+    `;
+  }
+}
+
+async function loadCompanies(): Promise<Company[]> {
+  const rows = await sql`SELECT * FROM companies WHERE active = TRUE ORDER BY id`;
+  return rows.map((r) => ({
+    id: r.id,
+    code: r.code,
+    legal_name: r.legal_name,
+    trade_name: r.trade_name,
+    nif: r.nif,
+    kind: r.kind,
+    active: !!r.active,
+    created_at: toIso(r.created_at),
+  }));
+}
+
+async function loadMembers(): Promise<{ company_id: number; user_id: number; role: string }[]> {
+  return await sql`SELECT company_id, user_id, role FROM company_members`;
+}
+
+async function resolveActiveCompanyId(token: string, userId: number): Promise<number> {
+  const companies = await loadCompanies();
+  const members = await loadMembers();
+  const accessible = companiesForUser(
+    userId,
+    members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
+    companies,
+  );
+  const sess = await sql`SELECT active_company_id FROM sessions WHERE token = ${token}`;
+  const preferred = sess[0]?.active_company_id as number | null | undefined;
+  const id = pickDefaultCompanyId(accessible, preferred);
+  if (id == null) throw new Error("Sin empresa asignada al usuario");
+  if (preferred !== id) {
+    await sql`UPDATE sessions SET active_company_id = ${id} WHERE token = ${token}`;
+  }
+  return id;
 }
 
 async function seedSettings() {
@@ -319,9 +427,18 @@ export const postgresApi = {
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
 
+    const companies = await loadCompanies();
+    const members = await loadMembers();
+    const accessible = companiesForUser(
+      user.id,
+      members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
+      companies,
+    );
+    const active_company_id = pickDefaultCompanyId(accessible);
+
     await sql`
-      INSERT INTO sessions (token, user_id)
-      VALUES (${token}, ${user.id})
+      INSERT INTO sessions (token, user_id, active_company_id)
+      VALUES (${token}, ${user.id}, ${active_company_id})
     `;
 
     // Limitar a las últimas 20 sesiones para evitar inflar la tabla
@@ -343,6 +460,8 @@ export const postgresApi = {
         temp_password_issued_at: toIso(user.temp_password_issued_at) || null,
       },
       token,
+      companies: accessible,
+      active_company_id,
     };
   },
 
@@ -358,6 +477,61 @@ export const postgresApi = {
     } catch {
       return null;
     }
+  },
+
+  async list_companies(token: string | null): Promise<Company[]> {
+    const user = await requireSession(token);
+    const companies = await loadCompanies();
+    const members = await loadMembers();
+    return companiesForUser(
+      user.id,
+      members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
+      companies,
+    );
+  },
+
+  async get_active_company(token: string | null): Promise<Company | null> {
+    const user = await requireSession(token);
+    if (!token) return null;
+    const cid = await resolveActiveCompanyId(token, user.id);
+    const companies = await loadCompanies();
+    return companies.find((c) => c.id === cid) ?? null;
+  },
+
+  async set_active_company(company_id: number, token: string | null): Promise<Company> {
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const members = await loadMembers();
+    if (
+      !canAccessCompany(
+        user.id,
+        company_id,
+        members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
+      )
+    ) {
+      throw new Error("No tienes acceso a esa empresa");
+    }
+    await sql`UPDATE sessions SET active_company_id = ${company_id} WHERE token = ${token}`;
+    const companies = await loadCompanies();
+    const c = companies.find((x) => x.id === company_id);
+    if (!c) throw new Error("Empresa no encontrada");
+    return c;
+  },
+
+  async billing_by_company(token: string | null) {
+    await requireSession(token);
+    const companies = await loadCompanies();
+    const sales = await sql`
+      SELECT company_id, total_cents, status FROM sales
+    `;
+    return billingByCompany(
+      sales.map((s) => ({
+        company_id: s.company_id,
+        total_cents: s.total_cents,
+        status: s.status,
+      })),
+      companies,
+    );
   },
 
   async list_users(token: string | null): Promise<AuthUser[]> {
@@ -514,13 +688,16 @@ export const postgresApi = {
   },
 
   async list_products(active_only: boolean, token: string | null): Promise<Product[]> {
-    await requireSession(token);
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     const products = active_only
-      ? await sql`SELECT * FROM products WHERE active = TRUE ORDER BY name ASC`
-      : await sql`SELECT * FROM products ORDER BY name ASC`;
+      ? await sql`SELECT * FROM products WHERE active = TRUE AND company_id = ${cid} ORDER BY name ASC`
+      : await sql`SELECT * FROM products WHERE company_id = ${cid} ORDER BY name ASC`;
 
     return products.map((p) => ({
       id: p.id,
+      company_id: p.company_id,
       sku: p.sku,
       name: p.name,
       description: p.description,
@@ -726,7 +903,9 @@ export const postgresApi = {
   },
 
   async create_sale(lines: SaleLineInput[], customer_id: number | null | undefined, notes: string | undefined, token: string | null): Promise<Sale> {
-    await requireSession(token);
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     if (lines.length === 0) throw new Error("La venta debe contener al menos una línea");
 
     const sale = await sql.begin(async (tx) => {
@@ -737,7 +916,7 @@ export const postgresApi = {
 
       // Obtener todos los productos implicados para verificar stock e IVA
       const productIds = lines.map((l) => l.product_id);
-      const prods = await tx`SELECT id, name, price_cents, vat_rate, stock FROM products WHERE id IN ${tx(productIds)}`;
+      const prods = await tx`SELECT id, name, price_cents, vat_rate, stock, company_id FROM products WHERE id IN ${tx(productIds)} AND company_id = ${cid}`;
       const prodMap = new Map(prods.map((p) => [p.id, p]));
 
       const calculatedLines = [];
@@ -788,8 +967,8 @@ export const postgresApi = {
 
       // 3. Crear venta
       const saleRes = await tx`
-        INSERT INTO sales (customer_id, number, subtotal_cents, vat_cents, total_cents, notes, status)
-        VALUES (${customer_id || null}, ${saleNumber}, ${subtotal}, ${totalVat}, ${total}, ${notes ?? ""}, 'completed')
+        INSERT INTO sales (customer_id, number, subtotal_cents, vat_cents, total_cents, notes, status, company_id)
+        VALUES (${customer_id || null}, ${saleNumber}, ${subtotal}, ${totalVat}, ${total}, ${notes ?? ""}, 'completed', ${cid})
         RETURNING *
       `;
       const createdSale = saleRes[0];
@@ -826,15 +1005,19 @@ export const postgresApi = {
   },
 
   async list_sales(token: string | null): Promise<Sale[]> {
-    await requireSession(token);
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     const sales = await sql`
       SELECT s.*, c.name as customer_name
       FROM sales s
       LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE s.company_id = ${cid}
       ORDER BY s.sold_at DESC
     `;
     return sales.map((s) => ({
       id: s.id,
+      company_id: s.company_id,
       customer_id: s.customer_id,
       customer_name: s.customer_name || undefined,
       number: s.number,

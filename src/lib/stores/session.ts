@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { AuthUser } from "$lib/types";
+import type { AuthUser, Company } from "$lib/types";
 
 const SESSION_KEY = "nix-c-session-v1";
 
@@ -7,6 +7,8 @@ export type SessionState = {
   user: AuthUser | null;
   token: string | null;
   ready: boolean;
+  companies: Company[];
+  activeCompanyId: number | null;
 };
 
 function loadStored(): Pick<SessionState, "user" | "token"> {
@@ -32,25 +34,59 @@ export const session = writable<SessionState>({
   user: null,
   token: initial.token,
   ready: false,
+  companies: [],
+  activeCompanyId: null,
 });
 
 export const currentUser = derived(session, ($s) => $s.user);
 export const isAuthenticated = derived(session, ($s) => !!$s.user && !!$s.token);
 export const isAdmin = derived(session, ($s) => $s.user?.role === "admin");
+export const activeCompany = derived(session, ($s) =>
+  $s.companies.find((c) => c.id === $s.activeCompanyId) ?? null,
+);
 export const mustChangePassword = derived(
   session,
   ($s) => !!$s.user?.must_change_password
 );
 
-export function setSession(user: AuthUser, token: string) {
-  session.update((s) => ({ ...s, user, token, ready: true }));
+export function setSession(
+  user: AuthUser,
+  token: string,
+  opts?: { companies?: Company[]; activeCompanyId?: number | null },
+) {
+  session.update((s) => ({
+    ...s,
+    user,
+    token,
+    ready: true,
+    companies: opts?.companies ?? s.companies,
+    activeCompanyId:
+      opts?.activeCompanyId !== undefined ? opts.activeCompanyId : s.activeCompanyId,
+  }));
   if (typeof sessionStorage !== "undefined") {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ user, token }));
   }
 }
 
+export function setActiveCompanyLocal(company: Company) {
+  session.update((s) => ({
+    ...s,
+    activeCompanyId: company.id,
+    companies: s.companies.some((c) => c.id === company.id)
+      ? s.companies
+      : [...s.companies, company],
+  }));
+}
+
 export function clearSession() {
-  session.update((s) => ({ ...s, user: null, token: null, ready: true }));
+  session.update((s) => ({
+    ...s,
+    user: null,
+    token: null,
+    ready: true,
+    companies: [],
+    activeCompanyId: null,
+  }));
   if (typeof sessionStorage !== "undefined") {
     sessionStorage.removeItem(SESSION_KEY);
   }

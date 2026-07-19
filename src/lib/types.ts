@@ -1,7 +1,31 @@
 import type { VatRate } from "./vat";
 
+/** app roles */
+export type UserRole = "admin" | "cajero";
+
+/** Multi-empresa: kind de negocio (docs/MULTI_COMPANY_ANALYSIS.md) */
+export type CompanyKind = "retail_secondhand" | "software_studio" | "generic";
+
+export type Company = {
+  id: number;
+  code: string;
+  legal_name: string;
+  trade_name: string;
+  nif: string;
+  kind: CompanyKind;
+  active: boolean;
+  created_at: string;
+};
+
+export type CompanyMember = {
+  company_id: number;
+  user_id: number;
+  role: UserRole;
+};
+
 export type Product = {
   id: number;
+  company_id?: number;
   sku: string;
   name: string;
   description: string;
@@ -32,6 +56,7 @@ export type ProductInput = {
 
 export type Customer = {
   id: number;
+  company_id?: number;
   name: string;
   email: string;
   phone: string;
@@ -71,6 +96,7 @@ export type SaleLine = {
 
 export type Sale = {
   id: number;
+  company_id?: number;
   customer_id: number | null;
   customer_name?: string | null;
   number: string;
@@ -87,6 +113,7 @@ export type CashKind = "income" | "expense" | "adjustment";
 
 export type CashMovement = {
   id: number;
+  company_id?: number;
   kind: CashKind;
   amount_cents: number;
   category: string;
@@ -148,9 +175,6 @@ export type AiChatResult = {
   offline?: boolean;
 };
 
-/** app roles */
-export type UserRole = "admin" | "cajero";
-
 export type AuthUser = {
   id: number;
   username: string;
@@ -181,4 +205,7 @@ export type CreateUserResult = {
 export type LoginResult = {
   user: AuthUser;
   token: string;
+  /** Empresas a las que el usuario tiene acceso (ciclo 7+) */
+  companies?: Company[];
+  active_company_id?: number | null;
 };

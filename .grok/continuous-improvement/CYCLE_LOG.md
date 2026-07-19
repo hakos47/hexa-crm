@@ -1,5 +1,27 @@
 # CYCLE_LOG
 
+## CICLO 7 — 2026-07-19
+
+```
+CICLO 7 — 2026-07-19
+Área auditada: multi-empresa (Company Tenant P0 slice)
+Cambio de mercado / evidencia:
+  - docs/MULTI_COMPANY_ANALYSIS.md: DEV + SHOP facturación separada
+  - BACKLOG M1
+Problema: una sola tienda; ventas/stock no se aíslan por NIF/emisor
+Hipótesis: companies + members + active_company_id + filter list/create
+Cambios:
+  - types Company; company/context.ts + tests
+  - browser-store v5 isolation + company-isolation.test
+  - postgres companies schema + list/set_active + filter products/sales
+  - RPC + client + session store + header switcher
+Pruebas: 107/107; check 0
+Antes → después: single-shop → SHOP/DEV con no-leak de ventas/productos
+Riesgos: settings globales aún mono; customers/cash filter incompleto en PG dashboard; SKU unique global en PG
+Siguiente: settings por empresa o devolución parcial
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 6 — 2026-07-18
 
 ```
