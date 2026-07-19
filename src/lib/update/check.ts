@@ -43,7 +43,7 @@ export async function checkGitHubUpdate(
     const res = await fetchFn(apiUrl, {
       headers: {
         Accept: "application/vnd.github+json",
-        "User-Agent": "Nix-C-UpdateCheck",
+        "User-Agent": "Hexa-CRM-UpdateCheck",
       },
     });
     if (!res.ok) {
@@ -115,7 +115,7 @@ export async function applyGitHubUpdate(
       ok: true,
       action: "opened_url",
       message:
-        "Se abrió la descarga/página de release en GitHub. Instala el paquete y reinicia Nix-C. La app no se actualiza sola en segundo plano.",
+        "Se abrió la descarga/página de release en GitHub. Instala el paquete y reinicia hexa-crm. La app no se actualiza sola en segundo plano.",
       url,
     };
   }

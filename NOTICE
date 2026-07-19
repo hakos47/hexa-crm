@@ -1,11 +1,11 @@
-Nix-C / Hexa CRM
+hexa-crm
 Copyright (c) 2026 HEXA-NIX contributors
 
 This product is licensed under the MIT License. See LICENSE.
 
 IMPORTANT — Fiscal / tax software disclaimer (Spain):
 
-Nix-C provides internal retail operations tooling (POS, inventory, cash drawer,
+hexa-crm provides internal retail operations tooling (POS, inventory, cash drawer,
 VAT control summaries). It is NOT certified AEAT / Veri*Factu / SIF billing
 software and must not be marketed as such until an independent legal/technical
 review and implementation of the certified path exist. See docs/ADR-001-verifactu-plan.md.

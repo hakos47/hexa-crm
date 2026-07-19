@@ -62,7 +62,7 @@ Si `GET .../releases/latest` devuelve **404** (aún no hay releases), el botón 
 
 1. Subir versión en `package.json` / `tauri.conf.json` y tag `vX.Y.Z`.
 2. Crear **Release** en GitHub con assets de instalación (AppImage/deb/msi…).
-3. En la app: **Buscar actualizaciones** → **Disponible** → **Descargar / instalar** → instalar archivo → reiniciar Nix-C.
+3. En la app: **Buscar actualizaciones** → **Disponible** → **Descargar / instalar** → instalar archivo → reiniciar hexa-crm.
 
 ### Futuro (fuera de alcance actual)
 

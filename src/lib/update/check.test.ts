@@ -11,8 +11,8 @@ describe("checkGitHubUpdate", () => {
       draft: false,
       assets: [
         {
-          name: "Nix-C.AppImage",
-          browser_download_url: "https://example.com/Nix-C.AppImage",
+          name: "hexa-crm.AppImage",
+          browser_download_url: "https://example.com/hexa-crm.AppImage",
         },
       ],
     };

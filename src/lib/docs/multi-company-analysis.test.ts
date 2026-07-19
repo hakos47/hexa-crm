@@ -34,7 +34,7 @@ describe("MULTI_COMPANY_ANALYSIS deliverable", () => {
     expect(text).toMatch(/billing_by_company|qué ha facturado cada uno|Billing by company/i);
     expect(text).toMatch(/consolidado/i);
 
-    // Criterion 3 — gaps vs current Nix-C
+    // Criterion 3 — gaps vs current hexa-crm
     expect(text).toMatch(/shop_name/);
     expect(text).toMatch(/sin multi-org|Sin multi-org|no existe.*Company/i);
     expect(text).toMatch(/ADR-001|VeriFactu|Veri\*Factu/i);

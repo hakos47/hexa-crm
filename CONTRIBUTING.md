@@ -1,4 +1,4 @@
-# Contribuir a Nix-C (hexa-crm)
+# Contribuir a hexa-crm
 
 Gracias por ayudar a un TPV/CRM **local-first** y open source para microcomercios.
 
@@ -38,6 +38,8 @@ feat/* | fix/* | docs/* | chore/*
 ```
 
 - **No** commits ni push directos a `main` (hooks + política del repo).
+- **Documenta cambios** en `CHANGELOG.md` (`[Unreleased]`) cuando el PR introduce comportamiento de producto.
+- Proceso de release (versión, tag, GitHub, Incus): [`docs/RELEASES.md`](./docs/RELEASES.md).
 - Emergencia documentada: `ALLOW_MAIN_COMMIT=1` / `ALLOW_MAIN_PUSH=1` (solo mantenedores).
 
 ## Qué se espera de un PR

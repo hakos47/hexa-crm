@@ -87,6 +87,8 @@ export type SaleLine = {
   product_id: number;
   product_name?: string;
   qty: number;
+  /** Units already returned (partial returns, ciclo 8). */
+  returned_qty?: number;
   unit_price_cents: number;
   vat_rate: VatRate;
   line_base_cents: number;
@@ -104,9 +106,17 @@ export type Sale = {
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
+  /** Cumulative refund cents from partial/full returns. */
+  refunded_cents?: number;
   notes: string;
+  /** completed | partially_returned | cancelled */
   status: string;
   lines?: SaleLine[];
+};
+
+export type ReturnLineInput = {
+  line_id: number;
+  qty: number;
 };
 
 export type CashKind = "income" | "expense" | "adjustment";

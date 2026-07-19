@@ -42,13 +42,13 @@ describe("compareVersions", () => {
 describe("classifyUpdate", () => {
   const baseRelease: RemoteRelease = {
     tag_name: "v0.2.0",
-    name: "Nix-C 0.2.0",
+    name: "hexa-crm 0.2.0",
     html_url: "https://github.com/HEXA-NIX/hexa-crm/releases/tag/v0.2.0",
     assets: [
       {
-        name: "Nix-C_0.2.0_amd64.AppImage",
+        name: "hexa-crm_0.2.0_amd64.AppImage",
         browser_download_url:
-          "https://github.com/HEXA-NIX/hexa-crm/releases/download/v0.2.0/Nix-C_0.2.0_amd64.AppImage",
+          "https://github.com/HEXA-NIX/hexa-crm/releases/download/v0.2.0/hexa-crm_0.2.0_amd64.AppImage",
       },
     ],
   };

@@ -20,6 +20,13 @@
   } from "$lib/update/check";
   import type { UpdateStatus } from "$lib/update/version";
   import { openExternalUrl } from "$lib/update/open-url";
+  import {
+    AJUSTES_SECTION_STORAGE_KEY,
+    type AjustesSectionId,
+    resolveActiveSection,
+    sectionById,
+    visibleAjustesSections,
+  } from "$lib/settings/sections";
 
   let settings = $state<Settings | null>(null);
   let health = $state<{ ok: boolean; models: string[] } | null>(null);
@@ -31,6 +38,8 @@
   let appVersion = $state(getAppVersion());
   let updateStatus = $state<UpdateStatus | null>(null);
   let updateBusy = $state(false);
+
+  let activeSection = $state<AjustesSectionId>("tienda");
 
   let userModal = $state(false);
   let editingUser = $state<AuthUser | null>(null);
@@ -50,6 +59,20 @@
     api.isTauri() ? "Tauri · SQLite" : "Web · API / Postgres o localStorage",
   );
 
+  const navSections = $derived(visibleAjustesSections($isAdmin));
+  const activeMeta = $derived(sectionById(activeSection));
+
+  function setSection(id: AjustesSectionId) {
+    activeSection = resolveActiveSection(id, $isAdmin);
+    if (typeof sessionStorage !== "undefined") {
+      try {
+        sessionStorage.setItem(AJUSTES_SECTION_STORAGE_KEY, activeSection);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   async function load() {
     loading = true;
     try {
@@ -66,7 +89,23 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    let stored: string | null = null;
+    if (typeof sessionStorage !== "undefined") {
+      try {
+        stored = sessionStorage.getItem(AJUSTES_SECTION_STORAGE_KEY);
+      } catch {
+        stored = null;
+      }
+    }
+    activeSection = resolveActiveSection(stored, $isAdmin);
+    load();
+  });
+
+  // If role flips and current section is admin-only, land on a safe tab.
+  $effect(() => {
+    activeSection = resolveActiveSection(activeSection, $isAdmin);
+  });
 
   async function save() {
     if (!settings) return;
@@ -101,7 +140,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `nix-c-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `hexa-crm-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       showToast("Copia de seguridad descargada");
@@ -262,386 +301,399 @@
 </script>
 
 {#if loading || !settings}
-  <div class="space-y-4">
-    <div class="skeleton h-16 w-full max-w-xl"></div>
-    <div class="grid gap-4 lg:grid-cols-2">
-      <div class="skeleton h-40"></div>
-      <div class="skeleton h-40"></div>
+  <div class="space-y-4" data-ajustes-loading>
+    <div class="skeleton h-14 w-full max-w-md"></div>
+    <div class="grid gap-4 lg:grid-cols-[14rem_1fr]">
+      <div class="skeleton h-64"></div>
+      <div class="skeleton h-72"></div>
     </div>
-    <div class="skeleton h-56"></div>
   </div>
 {:else}
-  <!-- Page header -->
-  <div
-    class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
+  <!-- Page header: calm orientation, not a wall of forms -->
+  <header
+    class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+    data-ajustes-header
   >
     <div>
       <p class="section-label mb-1">Configuración</p>
       <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)] sm:text-3xl">
         Ajustes
       </h1>
-      <p class="mt-1 max-w-xl text-sm text-[var(--color-muted)]">
-        Tienda, seguridad, Ollama y usuarios — mismo lenguaje visual que el resto del CRM.
+      <p class="mt-1 max-w-lg text-sm text-[var(--color-muted)]">
+        Elige una categoría a la izquierda. Solo ves lo que necesitas en cada momento.
       </p>
     </div>
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <p class="hidden text-xs text-[var(--color-muted-dim)] sm:block" data-ajustes-context>
+        {$currentUser?.display_name ?? "—"}
+        ·
+        {settings.shop_name || "Sin tienda"}
+      </p>
       <Button variant="secondary" onclick={load}>Recargar</Button>
-      <Button onclick={save}>Guardar ajustes</Button>
+      {#if activeMeta.hasSave}
+        <Button onclick={save} data-ajustes-save-header>Guardar ajustes</Button>
+      {/if}
     </div>
-  </div>
+  </header>
 
-  <!-- Status strip -->
-  <div class="mb-6 grid gap-3 sm:grid-cols-3">
-    <Card class="!p-4" lift={false}>
-      <div class="flex items-start gap-3">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-purple-400/25 bg-purple-500/15 text-lg text-[var(--color-purple-bright)]"
-        >
-          ◈
-        </div>
-        <div class="min-w-0">
-          <p class="section-label !text-[0.65rem]">Sesión</p>
-          <p class="mt-1 truncate font-medium text-[var(--color-text)]">
-            {$currentUser?.display_name ?? "—"}
-          </p>
-          <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-muted-dim)]">
-            <span>@{$currentUser?.username}</span>
-            <Badge tone={$currentUser?.role === "admin" ? "ai" : "ok"}>
-              {$currentUser?.role}
-            </Badge>
-          </p>
-        </div>
-      </div>
-    </Card>
-    <Card class="!p-4" lift={false}>
-      <div class="flex items-start gap-3">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-lg text-cyan-300"
-        >
-          ◎
-        </div>
-        <div class="min-w-0">
-          <p class="section-label !text-[0.65rem]">Tienda</p>
-          <p class="mt-1 truncate font-medium text-[var(--color-text)]">
-            {settings.shop_name || "Sin nombre"}
-          </p>
-          <p class="mt-0.5 text-xs text-[var(--color-muted-dim)]">
-            IVA por defecto {defaultVatStr}%
-          </p>
-        </div>
-      </div>
-    </Card>
-    <Card class="!p-4" lift={false}>
-      <div class="flex items-start gap-3">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/15 text-lg text-[var(--color-purple)]"
-        >
-          ✦
-        </div>
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center justify-between gap-2">
-            <p class="section-label !text-[0.65rem]">Ollama</p>
-            <Badge tone={health?.ok ? "ok" : "danger"}>
-              {health?.ok ? "Conectado" : "Offline"}
-            </Badge>
-          </div>
-          <p class="mt-1 truncate font-mono text-sm text-[var(--color-purple-bright)]">
-            {settings.ollama_model || "—"}
-          </p>
-          <p class="mt-0.5 truncate text-xs text-[var(--color-muted-dim)]">
-            {health?.models?.length ?? 0} modelo(s)
-          </p>
-        </div>
-      </div>
-    </Card>
-  </div>
-
-  <div class="grid gap-4 lg:grid-cols-2">
-    <!-- Security -->
-    <Card
-      lift={false}
-      class="relative overflow-hidden border border-[var(--color-border)] !p-5 lg:col-span-1"
+  <!-- Category shell: progressive disclosure -->
+  <div
+    class="grid gap-4 lg:grid-cols-[13.5rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)]"
+    data-ajustes-shell
+  >
+    <!-- Nav rail (pills on small screens) -->
+    <nav
+      class="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0"
+      data-ajustes-nav
+      aria-label="Categorías de ajustes"
     >
-      <div
-        class="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-purple-500/10 blur-2xl"
-      ></div>
-      <div class="relative">
-        <p class="section-label mb-1">Seguridad</p>
-        <h2 class="text-lg font-semibold text-[var(--color-text)]">Contraseña / PIN</h2>
-        <p class="mt-1 mb-4 text-xs text-[var(--color-muted)]">
-          Cambia las credenciales de la sesión actual.
-        </p>
-        <form
-          class="grid grid-cols-1 gap-3"
-          onsubmit={(e) => {
-            e.preventDefault();
-            changePin();
-          }}
+      {#each navSections as sec (sec.id)}
+        <button
+          type="button"
+          data-ajustes-nav-item={sec.id}
+          data-active={activeSection === sec.id ? "true" : "false"}
+          class="shrink-0 rounded-xl border px-3 py-2.5 text-left text-sm transition lg:w-full
+            {activeSection === sec.id
+            ? 'border-purple-400/40 bg-purple-500/15 text-[var(--color-purple-bright)] shadow-[0_0_20px_rgba(168,85,247,0.12)]'
+            : 'border-transparent bg-black/20 text-[var(--color-muted)] hover:border-[var(--color-border)] hover:bg-white/[0.03] hover:text-[var(--color-text)]'}
+            {sec.danger && activeSection !== sec.id ? 'text-rose-200/70' : ''}"
+          onclick={() => setSection(sec.id)}
         >
-          <Input label="Actual" type="password" bind:value={pinForm.current} required />
-          <div class="grid gap-3 sm:grid-cols-2">
-            <Input label="Nueva" type="password" bind:value={pinForm.next} required />
-            <Input label="Confirmar" type="password" bind:value={pinForm.confirm} required />
-          </div>
-          <div class="pt-1">
-            <Button type="submit" variant="secondary">Actualizar contraseña</Button>
-          </div>
-        </form>
-      </div>
-    </Card>
+          <span class="block font-medium leading-tight">{sec.label}</span>
+          {#if sec.adminOnly}
+            <span class="mt-0.5 block text-[0.65rem] opacity-70">Admin</span>
+          {/if}
+          {#if sec.danger}
+            <span class="mt-0.5 block text-[0.65rem] opacity-70">Zona sensible</span>
+          {/if}
+        </button>
+      {/each}
+    </nav>
 
-    <!-- Shop -->
-    <Card
-      lift={false}
-      class="relative overflow-hidden border border-[var(--color-border)] !p-5"
-    >
-      <div
-        class="pointer-events-none absolute -left-6 -bottom-6 h-24 w-24 rounded-full bg-fuchsia-500/10 blur-2xl"
-      ></div>
-      <div class="relative">
-        <p class="section-label mb-1">Comercio</p>
-        <h2 class="text-lg font-semibold text-[var(--color-text)]">Tienda</h2>
-        <p class="mt-1 mb-4 text-xs text-[var(--color-muted)]">
-          Nombre visible en login y asistente IA. Usa «Guardar ajustes» arriba.
-        </p>
-        <div class="grid grid-cols-1 gap-3">
-          <Input label="Nombre de la tienda" bind:value={settings.shop_name} />
-          <Select
-            label="IVA por defecto"
-            bind:value={defaultVatStr}
-            options={VAT_RATES.map((r) => ({ value: String(r), label: vatLabel(r) }))}
-          />
-        </div>
-      </div>
-    </Card>
-
-    <!-- Ollama full width -->
-    <Card
-      lift={false}
-      class="relative overflow-hidden border border-[var(--color-border-strong)] !p-5 glow-purple lg:col-span-2"
-    >
-      <div
-        class="pointer-events-none absolute right-0 top-0 h-32 w-48 rounded-full bg-purple-500/15 blur-3xl"
-      ></div>
-      <div class="relative">
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="section-label mb-1">Inteligencia local</p>
-            <h2 class="text-lg font-semibold text-radiant-bright">Ollama</h2>
-            <p class="mt-1 text-xs text-[var(--color-muted)]">
-              URL y modelo del asistente. Selecciona un chip o escribe el nombre.
-            </p>
-          </div>
-          <Badge tone={health?.ok ? "ok" : "danger"}>
-            {health?.ok ? "Conectado" : "Offline"}
-          </Badge>
-        </div>
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Input label="URL de Ollama" bind:value={settings.ollama_url} />
-          <Input label="Modelo" bind:value={settings.ollama_model} placeholder="qwen3.5:4b" />
-        </div>
-        {#if health?.models?.length}
-          <p class="section-label mt-4 mb-2 !normal-case !tracking-wide">Modelos detectados</p>
-          <div class="flex flex-wrap gap-2">
-            {#each health.models.slice(0, 16) as m}
-              <button
-                type="button"
-                class="rounded-full border px-3 py-1.5 text-xs transition {settings.ollama_model ===
-                m
-                  ? 'border-purple-400/50 bg-purple-500/20 text-[var(--color-purple-bright)] shadow-[0_0_16px_rgba(168,85,247,0.25)]'
-                  : 'border-[var(--color-border)] bg-black/30 text-[var(--color-muted)] hover:border-purple-400/40 hover:text-[var(--color-purple-bright)]'}"
-                onclick={() => selectModel(m)}
-              >
-                {m}
-              </button>
-            {/each}
-          </div>
-        {:else if health && !health.ok}
-          <p
-            class="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200/90"
-          >
-            Ollama no responde en esta URL. Arranca <code class="text-rose-100">ollama serve</code> o
-            revisa la dirección.
-          </p>
-        {/if}
-      </div>
-    </Card>
-
-    <!-- Users -->
-    {#if $isAdmin}
-      <Card lift={false} class="border border-[var(--color-border)] !p-0 lg:col-span-2">
-        <div
-          class="flex flex-col gap-3 border-b border-[var(--color-border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+    <!-- Single focus panel -->
+    <div class="min-w-0" data-ajustes-panel={activeSection} data-ajustes-active={activeSection}>
+      {#if activeSection === "cuenta"}
+        <Card
+          lift={false}
+          class="relative overflow-hidden border border-[var(--color-border)] !p-5"
         >
-          <div>
-            <p class="section-label mb-1">Equipo</p>
-            <h2 class="text-lg font-semibold text-[var(--color-text)]">Usuarios</h2>
-            <p class="mt-1 text-xs text-[var(--color-muted)]">
-              Al crear un usuario se genera una contraseña temporal de {TEMP_PASSWORD_LENGTH} caracteres
-              (24 h).
-            </p>
-          </div>
-          <Button onclick={openCreateUser}>+ Usuario</Button>
-        </div>
-        {#if users.length === 0}
-          <p class="px-5 py-8 text-center text-sm text-[var(--color-muted-dim)]">
-            No hay usuarios listados.
-          </p>
-        {:else}
-          <ul class="divide-y divide-white/[0.04]">
-            {#each users as u}
-              <li
-                class="flex flex-col gap-3 px-5 py-3.5 transition hover:bg-purple-500/[0.04] sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div class="flex min-w-0 items-center gap-3">
-                  <div
-                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-purple-400/30 bg-purple-500/15 text-sm font-semibold text-[var(--color-purple-bright)]"
-                  >
-                    {(u.display_name || u.username || "?").slice(0, 1).toUpperCase()}
-                  </div>
-                  <div class="min-w-0">
-                    <p class="font-medium text-[var(--color-text)]">
-                      {u.display_name}
-                      {#if !u.active}
-                        <Badge tone="danger">inactivo</Badge>
-                      {/if}
-                      {#if u.must_change_password}
-                        <Badge tone="warn">temp</Badge>
-                      {/if}
-                    </p>
-                    <p class="text-xs text-[var(--color-muted-dim)]">
-                      @{u.username} · <span class="capitalize">{u.role}</span>
-                    </p>
-                  </div>
-                </div>
-                <div class="flex flex-wrap gap-1.5 sm:justify-end">
-                  <Button variant="ghost" class="!px-2.5 !py-1.5 text-xs" onclick={() => openEditUser(u)}>
-                    Editar
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    class="!px-2.5 !py-1.5 text-xs"
-                    onclick={() => regenTemp(u)}
-                  >
-                    Nueva temp
-                  </Button>
-                </div>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </Card>
-    {/if}
+          <div
+            class="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-purple-500/10 blur-2xl"
+          ></div>
+          <div class="relative max-w-lg">
+            <p class="section-label mb-1">Seguridad</p>
+            <h2 class="text-lg font-semibold text-[var(--color-text)]">{activeMeta.title}</h2>
+            <p class="mt-1 mb-5 text-sm text-[var(--color-muted)]">{activeMeta.hint}</p>
 
-    <!-- Updates from GitHub -->
-    <div data-update-panel="github" class="lg:col-span-2">
-    <Card
-      lift={false}
-      class="relative overflow-hidden border border-[var(--color-border-strong)] !p-5 glow-purple"
-    >
-      <div
-        class="pointer-events-none absolute -right-10 top-0 h-32 w-40 rounded-full bg-purple-500/15 blur-3xl"
-      ></div>
-      <div class="relative">
-        <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p class="section-label mb-1">Actualizaciones</p>
-            <h2 class="text-lg font-semibold text-radiant-bright">Desde GitHub</h2>
-            <p class="mt-1 text-sm text-[var(--color-muted)]">
-              Versión instalada:
-              <span class="font-mono text-[var(--color-purple-bright)]" data-app-version>
-                {appVersion}
-              </span>
-              · Canal: HEXA-NIX/hexa-crm Releases
-            </p>
-          </div>
-          {#if updateStatus}
-            <Badge
-              tone={updateStatus.kind === "update_available"
-                ? "warn"
-                : updateStatus.kind === "up_to_date"
-                  ? "ok"
-                  : "danger"}
+            <div
+              class="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-black/25 px-3 py-2.5 text-sm"
             >
-              {updateStatus.kind === "update_available"
-                ? "Disponible"
-                : updateStatus.kind === "up_to_date"
-                  ? "Al día"
-                  : "Error"}
-            </Badge>
+              <span class="font-medium text-[var(--color-text)]">
+                {$currentUser?.display_name ?? "—"}
+              </span>
+              <span class="text-[var(--color-muted-dim)]">@{$currentUser?.username}</span>
+              <Badge tone={$currentUser?.role === "admin" ? "ai" : "ok"}>
+                {$currentUser?.role}
+              </Badge>
+            </div>
+
+            <form
+              class="grid grid-cols-1 gap-3"
+              onsubmit={(e) => {
+                e.preventDefault();
+                changePin();
+              }}
+            >
+              <Input label="Actual" type="password" bind:value={pinForm.current} required />
+              <div class="grid gap-3 sm:grid-cols-2">
+                <Input label="Nueva" type="password" bind:value={pinForm.next} required />
+                <Input label="Confirmar" type="password" bind:value={pinForm.confirm} required />
+              </div>
+              <div class="pt-1">
+                <Button type="submit" variant="secondary">Actualizar contraseña</Button>
+              </div>
+            </form>
+          </div>
+        </Card>
+      {:else if activeSection === "tienda"}
+        <Card
+          lift={false}
+          class="relative overflow-hidden border border-[var(--color-border)] !p-5"
+        >
+          <div
+            class="pointer-events-none absolute -left-6 -bottom-6 h-24 w-24 rounded-full bg-fuchsia-500/10 blur-2xl"
+          ></div>
+          <div class="relative max-w-lg">
+            <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="section-label mb-1">Comercio</p>
+                <h2 class="text-lg font-semibold text-[var(--color-text)]">{activeMeta.title}</h2>
+                <p class="mt-1 text-sm text-[var(--color-muted)]">{activeMeta.hint}</p>
+              </div>
+              <Button onclick={save} data-ajustes-save>Guardar ajustes</Button>
+            </div>
+            <div class="grid grid-cols-1 gap-3">
+              <Input label="Nombre de la tienda" bind:value={settings.shop_name} />
+              <Select
+                label="IVA por defecto"
+                bind:value={defaultVatStr}
+                options={VAT_RATES.map((r) => ({ value: String(r), label: vatLabel(r) }))}
+              />
+            </div>
+            <p class="mt-4 text-xs text-[var(--color-muted-dim)]">
+              Los cambios de nombre e IVA no se aplican hasta pulsar «Guardar ajustes».
+            </p>
+          </div>
+        </Card>
+      {:else if activeSection === "equipo" && $isAdmin}
+        <Card lift={false} class="border border-[var(--color-border)] !p-0">
+          <div
+            class="flex flex-col gap-3 border-b border-[var(--color-border)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p class="section-label mb-1">Equipo</p>
+              <h2 class="text-lg font-semibold text-[var(--color-text)]">{activeMeta.title}</h2>
+              <p class="mt-1 text-sm text-[var(--color-muted)]">
+                Al crear un usuario se genera una contraseña temporal de {TEMP_PASSWORD_LENGTH}
+                caracteres (24 h).
+              </p>
+            </div>
+            <Button onclick={openCreateUser}>+ Usuario</Button>
+          </div>
+          {#if users.length === 0}
+            <p class="px-5 py-8 text-center text-sm text-[var(--color-muted-dim)]">
+              No hay usuarios listados.
+            </p>
+          {:else}
+            <ul class="divide-y divide-white/[0.04]">
+              {#each users as u}
+                <li
+                  class="flex flex-col gap-3 px-5 py-3.5 transition hover:bg-purple-500/[0.04] sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div class="flex min-w-0 items-center gap-3">
+                    <div
+                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-purple-400/30 bg-purple-500/15 text-sm font-semibold text-[var(--color-purple-bright)]"
+                    >
+                      {(u.display_name || u.username || "?").slice(0, 1).toUpperCase()}
+                    </div>
+                    <div class="min-w-0">
+                      <p class="font-medium text-[var(--color-text)]">
+                        {u.display_name}
+                        {#if !u.active}
+                          <Badge tone="danger">inactivo</Badge>
+                        {/if}
+                        {#if u.must_change_password}
+                          <Badge tone="warn">temp</Badge>
+                        {/if}
+                      </p>
+                      <p class="text-xs text-[var(--color-muted-dim)]">
+                        @{u.username} · <span class="capitalize">{u.role}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5 sm:justify-end">
+                    <Button
+                      variant="ghost"
+                      class="!px-2.5 !py-1.5 text-xs"
+                      onclick={() => openEditUser(u)}
+                    >
+                      Editar
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      class="!px-2.5 !py-1.5 text-xs"
+                      onclick={() => regenTemp(u)}
+                    >
+                      Nueva temp
+                    </Button>
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </Card>
+      {:else if activeSection === "ia"}
+        <Card
+          lift={false}
+          class="relative overflow-hidden border border-[var(--color-border-strong)] !p-5 glow-purple"
+        >
+          <div
+            class="pointer-events-none absolute right-0 top-0 h-32 w-48 rounded-full bg-purple-500/15 blur-3xl"
+          ></div>
+          <div class="relative">
+            <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="section-label mb-1">Inteligencia local</p>
+                <h2 class="text-lg font-semibold text-radiant-bright">{activeMeta.title}</h2>
+                <p class="mt-1 text-sm text-[var(--color-muted)]">{activeMeta.hint}</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge tone={health?.ok ? "ok" : "danger"}>
+                  {health?.ok ? "Conectado" : "Offline"}
+                </Badge>
+                <Button onclick={save} data-ajustes-save>Guardar ajustes</Button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Input label="URL de Ollama" bind:value={settings.ollama_url} />
+              <Input label="Modelo" bind:value={settings.ollama_model} placeholder="qwen3.5:4b" />
+            </div>
+            {#if health?.models?.length}
+              <p class="section-label mt-4 mb-2 !normal-case !tracking-wide">Modelos detectados</p>
+              <div class="flex flex-wrap gap-2">
+                {#each health.models.slice(0, 16) as m}
+                  <button
+                    type="button"
+                    class="rounded-full border px-3 py-1.5 text-xs transition {settings.ollama_model ===
+                    m
+                      ? 'border-purple-400/50 bg-purple-500/20 text-[var(--color-purple-bright)] shadow-[0_0_16px_rgba(168,85,247,0.25)]'
+                      : 'border-[var(--color-border)] bg-black/30 text-[var(--color-muted)] hover:border-purple-400/40 hover:text-[var(--color-purple-bright)]'}"
+                    onclick={() => selectModel(m)}
+                  >
+                    {m}
+                  </button>
+                {/each}
+              </div>
+            {:else if health && !health.ok}
+              <p
+                class="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200/90"
+              >
+                Ollama no responde en esta URL. Arranca
+                <code class="text-rose-100">ollama serve</code>
+                o revisa la dirección.
+              </p>
+            {/if}
+          </div>
+        </Card>
+      {:else if activeSection === "actualizaciones"}
+        <div data-update-panel="github">
+          <Card
+            lift={false}
+            class="relative overflow-hidden border border-[var(--color-border-strong)] !p-5 glow-purple"
+          >
+            <div
+              class="pointer-events-none absolute -right-10 top-0 h-32 w-40 rounded-full bg-purple-500/15 blur-3xl"
+            ></div>
+            <div class="relative">
+              <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="section-label mb-1">Actualizaciones</p>
+                  <h2 class="text-lg font-semibold text-radiant-bright">{activeMeta.title}</h2>
+                  <p class="mt-1 text-sm text-[var(--color-muted)]">
+                    Versión instalada:
+                    <span class="font-mono text-[var(--color-purple-bright)]" data-app-version>
+                      {appVersion}
+                    </span>
+                    · Canal: HEXA-NIX/hexa-crm Releases
+                  </p>
+                </div>
+                {#if updateStatus}
+                  <Badge
+                    tone={updateStatus.kind === "update_available"
+                      ? "warn"
+                      : updateStatus.kind === "up_to_date"
+                        ? "ok"
+                        : "danger"}
+                  >
+                    {updateStatus.kind === "update_available"
+                      ? "Disponible"
+                      : updateStatus.kind === "up_to_date"
+                        ? "Al día"
+                        : "Error"}
+                  </Badge>
+                {/if}
+              </div>
+
+              {#if updateStatus}
+                <p
+                  class="mb-3 rounded-xl border border-[var(--color-border)] bg-black/30 px-3 py-2 text-sm text-[var(--color-muted)]"
+                  data-update-status
+                >
+                  {updateStatus.message}
+                  {#if updateStatus.latest_version && updateStatus.kind === "update_available"}
+                    <span class="mt-1 block font-mono text-xs text-[var(--color-purple-bright)]">
+                      Remoto: v{updateStatus.latest_version}
+                    </span>
+                  {/if}
+                </p>
+              {/if}
+
+              {#if !api.isTauri()}
+                <p
+                  class="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90"
+                  data-update-web-fallback
+                >
+                  Modo web: puedes comprobar releases y abrir GitHub, pero <strong>no</strong> se
+                  instala un binario en el navegador. La actualización completa del empaquetado es
+                  para la app de escritorio (Tauri).
+                </p>
+              {/if}
+
+              <div class="flex flex-wrap gap-2">
+                <Button onclick={onCheckUpdate} disabled={updateBusy}>
+                  {updateBusy ? "Comprobando…" : "Buscar actualizaciones"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onclick={onApplyUpdate}
+                  disabled={updateBusy || updateStatus?.kind !== "update_available"}
+                >
+                  {api.isTauri() ? "Descargar / instalar" : "Abrir descarga en GitHub"}
+                </Button>
+                <Button variant="ghost" onclick={openReleasesPage} disabled={updateBusy}>
+                  Ver releases
+                </Button>
+              </div>
+              <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
+                Al aplicar se abre la página o el asset de la release. Debes instalar y reiniciar; la
+                app no se actualiza sola en segundo plano.
+              </p>
+            </div>
+          </Card>
+        </div>
+      {:else if activeSection === "sistema"}
+        <div class="space-y-4" data-ajustes-danger-zone>
+          <Card lift={false} class="border border-[var(--color-border)] !p-5">
+            <p class="section-label mb-1">Sistema</p>
+            <h2 class="text-lg font-semibold text-[var(--color-text)]">Entorno y copias</h2>
+            <p class="mt-1 mb-4 text-sm text-[var(--color-muted)]">
+              Runtime:
+              <span class="text-[var(--color-purple-bright)]">{runtimeMode}</span>
+              · Documentación en
+              <code class="text-xs text-[var(--color-muted)]">docs/BACKUP.md</code>
+            </p>
+            {#if $isAdmin}
+              <div class="flex flex-wrap gap-2">
+                <Button variant="secondary" onclick={exportBackup}>Exportar copia</Button>
+              </div>
+              <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
+                Descarga un JSON con los datos de la instancia (browser o API).
+              </p>
+            {:else}
+              <p class="text-sm text-[var(--color-muted)]">
+                Las copias de seguridad las gestiona un administrador.
+              </p>
+            {/if}
+          </Card>
+
+          {#if $isAdmin && !api.isTauri()}
+            <Card
+              lift={false}
+              class="border border-rose-500/30 bg-rose-500/[0.06] !p-5"
+              data-ajustes-danger-card
+            >
+              <p class="section-label mb-1 !text-rose-300/80">Zona de peligro</p>
+              <h2 class="text-lg font-semibold text-rose-100">Restaurar demo</h2>
+              <p class="mt-1 mb-4 text-sm text-rose-100/75">
+                Borra los datos actuales de la instancia web y cierra la sesión. No se puede
+                deshacer desde la app.
+              </p>
+              <Button variant="danger" onclick={resetDemo}>Restaurar demo</Button>
+            </Card>
           {/if}
         </div>
-
-        {#if updateStatus}
-          <p class="mb-3 rounded-xl border border-[var(--color-border)] bg-black/30 px-3 py-2 text-sm text-[var(--color-muted)]" data-update-status>
-            {updateStatus.message}
-            {#if updateStatus.latest_version && updateStatus.kind === "update_available"}
-              <span class="mt-1 block font-mono text-xs text-[var(--color-purple-bright)]">
-                Remoto: v{updateStatus.latest_version}
-              </span>
-            {/if}
-          </p>
-        {/if}
-
-        {#if !api.isTauri()}
-          <p
-            class="mb-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90"
-            data-update-web-fallback
-          >
-            Modo web: puedes comprobar releases y abrir GitHub, pero <strong>no</strong> se instala
-            un binario en el navegador. La actualización completa del empaquetado es para la app de
-            escritorio (Tauri).
-          </p>
-        {/if}
-
-        <div class="flex flex-wrap gap-2">
-          <Button onclick={onCheckUpdate} disabled={updateBusy}>
-            {updateBusy ? "Comprobando…" : "Buscar actualizaciones"}
-          </Button>
-          <Button
-            variant="secondary"
-            onclick={onApplyUpdate}
-            disabled={updateBusy || updateStatus?.kind !== "update_available"}
-          >
-            {api.isTauri() ? "Descargar / instalar" : "Abrir descarga en GitHub"}
-          </Button>
-          <Button variant="ghost" onclick={openReleasesPage} disabled={updateBusy}>
-            Ver releases
-          </Button>
-        </div>
-        <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
-          Al aplicar se abre la página o el asset de la release. Debes instalar y reiniciar; la app
-          no se actualiza sola en segundo plano.
-        </p>
-      </div>
-    </Card>
-    </div>
-
-    <!-- Environment / danger -->
-    <Card
-      lift={false}
-      class="border border-[var(--color-border)] !p-5 lg:col-span-2"
-    >
-      <p class="section-label mb-1">Sistema</p>
-      <h2 class="text-lg font-semibold text-[var(--color-text)]">Entorno y copias</h2>
-      <p class="mt-1 mb-4 text-sm text-[var(--color-muted)]">
-        Runtime: <span class="text-[var(--color-purple-bright)]">{runtimeMode}</span>
-        · Documentación en <code class="text-xs text-[var(--color-muted)]">docs/BACKUP.md</code>
-      </p>
-      <div class="flex flex-wrap gap-2">
-        {#if $isAdmin}
-          <Button variant="secondary" onclick={exportBackup}>Exportar copia</Button>
-        {/if}
-        {#if $isAdmin && !api.isTauri()}
-          <Button variant="danger" onclick={resetDemo}>Restaurar demo</Button>
-        {/if}
-      </div>
-      {#if $isAdmin && !api.isTauri()}
-        <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
-          «Restaurar demo» borra datos de la instancia web y cierra sesión.
-        </p>
       {/if}
-    </Card>
+    </div>
   </div>
 {/if}
 

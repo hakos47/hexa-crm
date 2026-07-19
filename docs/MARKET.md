@@ -1,4 +1,4 @@
-# Análisis de mercado — Hexa CRM / Nix-C
+# Análisis de mercado — hexa-crm
 
 Fecha de referencia: 2026-07-18.
 

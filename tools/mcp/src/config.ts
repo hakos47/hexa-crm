@@ -4,7 +4,7 @@
  */
 
 export type McpConfig = {
-  /** Base URL of Nix-C (no trailing slash), e.g. http://127.0.0.1:1420 */
+  /** Base URL of hexa-crm (no trailing slash), e.g. http://127.0.0.1:1420 */
   rpcBaseUrl: string;
   /** Path to RPC endpoint */
   rpcPath: string;
@@ -17,14 +17,25 @@ export type McpConfig = {
   timeoutMs: number;
 };
 
+function firstEnv(...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v != null && String(v).trim() !== "") return v;
+  }
+  return undefined;
+}
+
 export function loadConfig(): McpConfig {
-  const rpcBaseUrl = (process.env.NIX_C_URL || process.env.NIX_C_RPC_BASE || "http://127.0.0.1:1420").replace(
-    /\/$/,
-    "",
-  );
-  const rpcPath = process.env.NIX_C_RPC_PATH || "/api/rpc";
-  const agentToken = process.env.NIX_C_AGENT_TOKEN?.trim() || process.env.NIX_C_TOKEN?.trim() || null;
-  const timeoutMs = Number(process.env.NIX_C_RPC_TIMEOUT_MS || "60000");
+  // Prefer HEXA_CRM_*; fall back to legacy NIX_C_* so existing agent configs keep working.
+  const rpcBaseUrl = (
+    firstEnv("HEXA_CRM_URL", "HEXA_CRM_RPC_BASE", "NIX_C_URL", "NIX_C_RPC_BASE") ||
+    "http://127.0.0.1:1420"
+  ).replace(/\/$/, "");
+  const rpcPath = firstEnv("HEXA_CRM_RPC_PATH", "NIX_C_RPC_PATH") || "/api/rpc";
+  const agentToken =
+    firstEnv("HEXA_CRM_AGENT_TOKEN", "HEXA_CRM_TOKEN", "NIX_C_AGENT_TOKEN", "NIX_C_TOKEN")?.trim() ||
+    null;
+  const timeoutMs = Number(firstEnv("HEXA_CRM_RPC_TIMEOUT_MS", "NIX_C_RPC_TIMEOUT_MS") || "60000");
 
   return {
     rpcBaseUrl,

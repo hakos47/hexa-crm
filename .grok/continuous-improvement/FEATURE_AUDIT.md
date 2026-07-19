@@ -4,12 +4,12 @@
 |---------------|-----------------|--------|-----------|---------|
 | Login/PIN/temp PW | ciclo 0 | ok | — | auth-*.test |
 | Inventario categorías | ciclo 0 | ok | — | manual |
-| **Import CSV productos** | **ciclo 4** | **gap→fix** | solo export ventas/IVA | product-csv.test |
-| Export CSV catálogo | ciclo 4 | ok | — | product-csv round-trip |
+| Import CSV productos | ciclo 4 | ok | — | product-csv.test |
 | TPV SKU Enter | ciclo 0 | ok | — | quick-add.test |
-| TPV descuento línea | ciclo 1+3 | ok | — | sale-discount + plan |
-| Anulación ticket | ciclo 2 | ok | parcial pendiente | cancel-sale |
+| TPV descuento línea/% carrito | ciclo 1–6 | ok | — | sale-discount + cart-discount |
+| Anulación + devolución parcial | ciclo 8 | ok | Tauri return pendiente | partial-return* |
+| **Caja cierre + arqueo** | **ciclo 9** | **ok** | — | daily-close + cash-reconcile + caja-ui |
 | CSV ventas/IVA | ciclo 0 | ok | — | csv.test |
-| Multi-empresa | análisis docs | no impl | Company Tenant | multi-company-analysis.test |
-| Ajustes UI design | **ciclo 5** | **ok** | era formulario genérico | ajustes-layout.test |
-| Descuento % carrito | **ciclo 6** | **ok** | solo línea antes | cart-discount.test |
+| Multi-empresa | ciclo 7 | ok slice | settings mono | company-isolation |
+| Ajustes UI | ciclo 5 + reorg | ok | — | ajustes-layout |
+| Clientes | ciclo 0 | basico | sin historial compras | — |

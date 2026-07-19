@@ -30,6 +30,7 @@ import type {
   LoginResult,
   Product,
   ProductInput,
+  ReturnLineInput,
   Sale,
   SaleLineInput,
   Settings,
@@ -44,6 +45,7 @@ import {
   seedCompanies,
   seedCompanyMembers,
 } from "../company/context";
+import { planPartialReturn, remainingLineAmounts } from "../sales/partial-return";
 
 // Prefer Vite/SvelteKit private env; fall back to process.env and local Docker defaults.
 function resolveDatabaseUrl(): string {
@@ -226,6 +228,9 @@ export async function initDb() {
   await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+  // Partial returns (ciclo 8)
+  await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
 
   // Seeders
   await seedSettings();
@@ -396,7 +401,7 @@ async function requireAdmin(token: string | null): Promise<AuthUser> {
 export const postgresApi = {
   async public_meta(): Promise<{ shop_name: string }> {
     const res = await sql`SELECT value FROM settings WHERE key = 'shop_name'`;
-    return { shop_name: res[0]?.value || "Nix-C" };
+    return { shop_name: res[0]?.value || "hexa-crm" };
   },
 
   async login(username: string, password: string): Promise<LoginResult> {
@@ -1025,6 +1030,7 @@ export const postgresApi = {
       subtotal_cents: s.subtotal_cents,
       vat_cents: s.vat_cents,
       total_cents: s.total_cents,
+      refunded_cents: s.refunded_cents ?? 0,
       notes: s.notes,
       status: s.status,
     }));
@@ -1057,6 +1063,7 @@ export const postgresApi = {
       subtotal_cents: s.subtotal_cents,
       vat_cents: s.vat_cents,
       total_cents: s.total_cents,
+      refunded_cents: s.refunded_cents ?? 0,
       notes: s.notes,
       status: s.status,
       lines: lines.map((l) => ({
@@ -1065,6 +1072,7 @@ export const postgresApi = {
         product_id: l.product_id,
         product_name: l.product_name,
         qty: l.qty,
+        returned_qty: l.returned_qty ?? 0,
         unit_price_cents: l.unit_price_cents,
         vat_rate: l.vat_rate,
         line_base_cents: l.line_base_cents,
@@ -1074,47 +1082,81 @@ export const postgresApi = {
     };
   },
 
-  async cancel_sale(id: number, token: string | null): Promise<Sale> {
+  async return_sale_lines(
+    id: number,
+    requests: ReturnLineInput[],
+    token: string | null,
+  ): Promise<Sale> {
     await requireSession(token);
     const now = new Date();
 
-    const cancelled = await sql.begin(async (tx) => {
-      // 1. Obtener la venta
+    await sql.begin(async (tx) => {
       const saleRes = await tx`SELECT * FROM sales WHERE id = ${id}`;
       if (saleRes.length === 0) throw new Error("Venta no encontrada");
       const s = saleRes[0];
-      if (s.status === "cancelled") throw new Error("La venta ya está cancelada");
+      const lines = await tx`SELECT * FROM sale_lines WHERE sale_id = ${id}`;
+      const plan = planPartialReturn(
+        {
+          id: s.id,
+          number: s.number,
+          status: s.status,
+          total_cents: s.total_cents,
+          refunded_cents: s.refunded_cents ?? 0,
+        },
+        lines.map((l) => ({
+          id: l.id,
+          product_id: l.product_id,
+          qty: l.qty,
+          returned_qty: l.returned_qty ?? 0,
+          line_total_cents: l.line_total_cents,
+          line_base_cents: l.line_base_cents,
+          line_vat_cents: l.line_vat_cents,
+        })),
+        requests,
+      );
 
-      // 2. Obtener las líneas
-      const lines = await tx`SELECT product_id, qty FROM sale_lines WHERE sale_id = ${id}`;
-
-      // 3. Devolver stock a productos
-      for (const line of lines) {
+      for (const pl of plan.lines) {
         await tx`
-          UPDATE products
-          SET stock = stock + ${line.qty}, updated_at = ${now}
-          WHERE id = ${line.product_id}
-        `;
-
-        await tx`
-          INSERT INTO stock_movements (product_id, delta, reason, ref_type, ref_id)
-          VALUES (${line.product_id}, ${line.qty}, ${`Cancelación de venta ${s.number}`}, 'sale', ${id})
+          UPDATE sale_lines SET returned_qty = ${pl.new_returned_qty} WHERE id = ${pl.line_id}
         `;
       }
-
-      // 4. Modificar estado de la venta
-      await tx`UPDATE sales SET status = 'cancelled' WHERE id = ${id}`;
-
-      // 5. Registrar devolución en caja (movimiento negativo que anula el ingreso)
+      for (const r of plan.stock_restores) {
+        await tx`
+          UPDATE products SET stock = stock + ${r.qty}, updated_at = ${now} WHERE id = ${r.product_id}
+        `;
+        await tx`
+          INSERT INTO stock_movements (product_id, delta, reason, ref_type, ref_id)
+          VALUES (${r.product_id}, ${r.qty}, ${plan.cash_description}, 'sale', ${id})
+        `;
+      }
+      await tx`
+        UPDATE sales
+        SET status = ${plan.new_status}, refunded_cents = ${plan.new_refunded_cents}
+        WHERE id = ${id}
+      `;
       await tx`
         INSERT INTO cash_movements (kind, amount_cents, category, description, sale_id)
-        VALUES ('expense', ${s.total_cents}, 'devoluciones', ${`Anulación de venta ${s.number}`}, ${id})
+        VALUES ('expense', ${plan.cash_expense_cents}, ${plan.cash_category}, ${plan.cash_description}, ${id})
       `;
-
-      return s;
     });
 
-    return this.get_sale(cancelled.id, token);
+    return this.get_sale(id, token);
+  },
+
+  async cancel_sale(id: number, token: string | null): Promise<Sale> {
+    await requireSession(token);
+    const saleRes = await sql`SELECT * FROM sales WHERE id = ${id}`;
+    if (saleRes.length === 0) throw new Error("Venta no encontrada");
+    if (saleRes[0].status === "cancelled") throw new Error("La venta ya está cancelada");
+    const lines = await sql`SELECT id, qty, returned_qty FROM sale_lines WHERE sale_id = ${id}`;
+    const requests: ReturnLineInput[] = lines
+      .map((l) => ({
+        line_id: l.id as number,
+        qty: Math.max(0, (l.qty as number) - ((l.returned_qty as number) ?? 0)),
+      }))
+      .filter((r) => r.qty > 0);
+    if (!requests.length) throw new Error("La venta ya está anulada");
+    return this.return_sale_lines(id, requests, token);
   },
 
   async list_cash_movements(token: string | null): Promise<CashMovement[]> {
@@ -1172,47 +1214,43 @@ export const postgresApi = {
 
   async vat_summary(from: string, to: string, token: string | null): Promise<VatSummary> {
     await requireSession(token);
-    // Filtrar solo ventas 'completed'
-    const sales = await sql`
-      SELECT subtotal_cents, vat_cents, total_cents, sold_at
-      FROM sales
-      WHERE status = 'completed' 
-        AND sold_at >= ${new Date(from)} 
-        AND sold_at <= ${new Date(to + "T23:59:59.999Z")}
-    `;
-
-    let totalBase = 0;
-    let totalVat = 0;
-    let totalSales = 0;
-
-    for (const s of sales) {
-      totalBase += s.subtotal_cents;
-      totalVat += s.vat_cents;
-      totalSales += s.total_cents;
-    }
-
-    // Calcular desglose por tipo de IVA
+    // completed + partially_returned; net amounts after returned_qty (ciclo 8)
     const lines = await sql`
-      SELECT sl.vat_rate, SUM(sl.line_base_cents)::bigint as base, SUM(sl.line_vat_cents)::bigint as vat, SUM(sl.line_total_cents)::bigint as total
+      SELECT sl.id, sl.product_id, sl.qty, sl.returned_qty, sl.vat_rate,
+             sl.line_base_cents, sl.line_vat_cents, sl.line_total_cents
       FROM sale_lines sl
       JOIN sales s ON sl.sale_id = s.id
-      WHERE s.status = 'completed'
-        AND s.sold_at >= ${new Date(from)} 
+      WHERE s.status IN ('completed', 'partially_returned')
+        AND s.sold_at >= ${new Date(from)}
         AND s.sold_at <= ${new Date(to + "T23:59:59.999Z")}
-      GROUP BY sl.vat_rate
     `;
 
     const bucketsMap = new Map<number, { base: number; vat: number; total: number }>();
     for (const rate of [0, 4, 10, 21]) {
       bucketsMap.set(rate, { base: 0, vat: 0, total: 0 });
     }
+    let totalBase = 0;
+    let totalVat = 0;
+    let totalSales = 0;
     for (const l of lines) {
+      const net = remainingLineAmounts({
+        id: l.id,
+        product_id: l.product_id,
+        qty: l.qty,
+        returned_qty: l.returned_qty ?? 0,
+        line_total_cents: l.line_total_cents,
+        line_base_cents: l.line_base_cents,
+        line_vat_cents: l.line_vat_cents,
+      });
       const rate = Number(l.vat_rate);
       const b = bucketsMap.get(rate) ?? { base: 0, vat: 0, total: 0 };
-      b.base += Number(l.base);
-      b.vat += Number(l.vat);
-      b.total += Number(l.total);
+      b.base += net.base_cents;
+      b.vat += net.vat_cents;
+      b.total += net.total_cents;
       bucketsMap.set(rate, b);
+      totalBase += net.base_cents;
+      totalVat += net.vat_cents;
+      totalSales += net.total_cents;
     }
     const buckets = [0, 4, 10, 21].map((vat_rate) => {
       const b = bucketsMap.get(vat_rate)!;
@@ -1249,26 +1287,31 @@ export const postgresApi = {
     const endYesterday = new Date(yesterdayStr + "T23:59:59.999Z");
     const startMonth = new Date(monthStr + "-01T00:00:00.000Z");
 
+    // Net revenue = total_cents - refunded_cents; include partial returns
     const todayRes = await sql`
-      SELECT COALESCE(SUM(total_cents), 0)::int as total, COUNT(*)::int as count
+      SELECT COALESCE(SUM(total_cents - COALESCE(refunded_cents, 0)), 0)::int as total,
+             COUNT(*)::int as count
       FROM sales
-      WHERE status = 'completed' AND sold_at >= ${startToday} AND sold_at <= ${endToday}
+      WHERE status IN ('completed', 'partially_returned')
+        AND sold_at >= ${startToday} AND sold_at <= ${endToday}
     `;
 
     const yesterdayRes = await sql`
-      SELECT COALESCE(SUM(total_cents), 0)::int as total, COUNT(*)::int as count
+      SELECT COALESCE(SUM(total_cents - COALESCE(refunded_cents, 0)), 0)::int as total,
+             COUNT(*)::int as count
       FROM sales
-      WHERE status = 'completed' AND sold_at >= ${startYesterday} AND sold_at <= ${endYesterday}
+      WHERE status IN ('completed', 'partially_returned')
+        AND sold_at >= ${startYesterday} AND sold_at <= ${endYesterday}
     `;
 
     const monthRes = await sql`
       SELECT
-        COALESCE(SUM(total_cents), 0)::int as total,
+        COALESCE(SUM(total_cents - COALESCE(refunded_cents, 0)), 0)::int as total,
         COALESCE(SUM(vat_cents), 0)::int as vat,
         COALESCE(SUM(subtotal_cents), 0)::int as base,
         COUNT(*)::int as count
       FROM sales
-      WHERE status = 'completed' AND sold_at >= ${startMonth}
+      WHERE status IN ('completed', 'partially_returned') AND sold_at >= ${startMonth}
     `;
 
     const cash = await this.get_cash_balance(token);

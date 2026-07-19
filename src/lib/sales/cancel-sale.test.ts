@@ -47,8 +47,9 @@ describe("planCancelSale", () => {
 });
 
 describe("countsInBusinessTotals", () => {
-  it("only completed counts", () => {
+  it("completed and partially_returned count; cancelled does not", () => {
     expect(countsInBusinessTotals("completed")).toBe(true);
+    expect(countsInBusinessTotals("partially_returned")).toBe(true);
     expect(countsInBusinessTotals("cancelled")).toBe(false);
   });
 });

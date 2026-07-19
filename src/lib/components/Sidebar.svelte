@@ -49,7 +49,7 @@
     <Logo size={40} class="rounded-xl shadow-[0_0_20px_rgba(168,85,247,0.25)]" />
     {#if !collapsed}
       <div class="min-w-0">
-        <p class="truncate text-sm font-semibold tracking-wide text-[var(--color-text)]">Nix-C</p>
+        <p class="truncate text-sm font-semibold tracking-wide text-[var(--color-text)]">hexa-crm</p>
         <p class="truncate text-[11px] text-[var(--color-muted-dim)]">Gestión de tienda</p>
       </div>
     {/if}

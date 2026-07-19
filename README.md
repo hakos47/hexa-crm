@@ -1,4 +1,4 @@
-# Nix-C (hexa-crm)
+# hexa-crm
 
 [![CI](https://github.com/HEXA-NIX/hexa-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/HEXA-NIX/hexa-crm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
@@ -15,6 +15,8 @@ Diseñado para **bajo consumo** (SQLite / Postgres local, modelos Ollama pequeñ
 | **Seguridad** | [SECURITY.md](./SECURITY.md) |
 | **Conducta** | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) |
 | **Agentes / ramas** | [AGENTS.md](./AGENTS.md) |
+| **Changelog** | [CHANGELOG.md](./CHANGELOG.md) |
+| **Releases** | [docs/RELEASES.md](./docs/RELEASES.md) |
 
 ## Por qué existe
 
@@ -123,7 +125,7 @@ Servidor de herramientas para Grok/Cursor: cada acción en un archivo.
 ```bash
 npm run mcp:install && npm run mcp:build
 # CRM en :1420, luego:
-NIX_C_URL=http://127.0.0.1:1420 npm run mcp:dev
+HEXA_CRM_URL=http://127.0.0.1:1420 npm run mcp:dev
 ```
 
 Ver [tools/mcp/README.md](./tools/mcp/README.md).

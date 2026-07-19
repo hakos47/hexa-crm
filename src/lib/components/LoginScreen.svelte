@@ -8,7 +8,7 @@
   let password = $state("");
   let error = $state("");
   let loading = $state(false);
-  let shopName = $state("Nix-C");
+  let shopName = $state("hexa-crm");
 
   let userInputEl: HTMLInputElement | undefined = $state();
 
@@ -16,7 +16,7 @@
     api
       .publicMeta()
       .then((s) => {
-        shopName = s.shop_name || "Nix-C";
+        shopName = s.shop_name || "hexa-crm";
       })
       .catch(() => {});
   });

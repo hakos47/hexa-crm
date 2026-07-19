@@ -1,5 +1,5 @@
 /**
- * Thin client to Nix-C POST /api/rpc
+ * Thin client to hexa-crm POST /api/rpc
  */
 
 import { loadConfig, rpcUrl, type McpConfig } from "./config.js";

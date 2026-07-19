@@ -1,4 +1,4 @@
-# Roadmap — Hexa CRM / Nix-C
+# Roadmap — hexa-crm
 
 Este roadmap prioriza evidencia, seguridad y una base fiscal auditable. Las fechas son objetivos, no promesas comerciales.
 

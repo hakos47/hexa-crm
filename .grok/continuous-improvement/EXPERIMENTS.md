@@ -6,3 +6,5 @@
 | E2 | cancel_sale restaura stock+caja | sin void | stock/caja/IVA | OK ciclo 2 | Adoptado |
 | E3 | Postgres create_sale debe usar lineBreakdown+discount | total ignoraba dto (990 vs 900) | total_cents y cash = neto | **OK ciclo 3** live RPC total=900 cash+=900 | Adoptado |
 | E4 | Import CSV productos con upsert por SKU | Solo alta manual | parse ok + round-trip export | **OK ciclo 4** 7 tests + UI | Adoptado |
+| E5 | Devolución parcial por línea con returned_qty | Solo cancel total | stock+caja+IVA net | **OK ciclo 8** 132 tests | Adoptado (web/browser) |
+| E6 | Arqueo contado vs saldo sistema + ajuste | Solo KPI saldo | descuadre + movimiento | **OK ciclo 9** 141 tests | Adoptado |

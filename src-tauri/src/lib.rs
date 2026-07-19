@@ -27,7 +27,7 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|e| e.to_string())?
-                .join("nix-c.db");
+                .join("hexa-crm.db");
             let db = open_db(path)?;
             app.manage(db);
             Ok(())

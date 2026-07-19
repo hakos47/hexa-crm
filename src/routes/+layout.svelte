@@ -58,7 +58,7 @@
   };
 
   function metaFor(path: string) {
-    return titles[path] ?? { title: "Nix-C", subtitle: "" };
+    return titles[path] ?? { title: "hexa-crm", subtitle: "" };
   }
 
   const canEnter = $derived(

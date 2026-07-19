@@ -1,12 +1,12 @@
 {
-  "name": "@hexa-nix/nix-c-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for Nix-C CRM — one file per agent action",
+  "name": "@hexa-nix/hexa-crm-mcp",
+  "version": "0.2.0",
+  "description": "MCP server for hexa-crm \u2014 one file per agent action",
   "type": "module",
   "private": true,
   "license": "MIT",
   "bin": {
-    "nix-c-mcp": "./dist/index.js"
+    "hexa-crm-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

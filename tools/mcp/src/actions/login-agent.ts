@@ -7,7 +7,7 @@ import type { ActionMeta } from "./_types.js";
 export const meta: ActionMeta = {
   name: "login_agent",
   description:
-    "Inicia sesión en Nix-C como agente/usuario y guarda el token en el proceso MCP. Usar usuario+contraseña del CRM (p.ej. admin/1234 en demo). Si NIX_C_AGENT_TOKEN ya está en el entorno, no es obligatorio.",
+    "Inicia sesión en hexa-crm como agente/usuario y guarda el token en el proceso MCP. Usar usuario+contraseña del CRM (p.ej. admin/1234 en demo). Si HEXA_CRM_AGENT_TOKEN (o legado NIX_C_AGENT_TOKEN) ya está en el entorno, no es obligatorio.",
   category: "auth",
 };
 

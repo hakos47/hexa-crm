@@ -10,3 +10,7 @@
 | 2026-07-18 C4 | Import CSV con cabeceras canónicas + aliases ES | Solo EN headers | Onboarding tienda ES; round-trip con export |
 | 2026-07-18 C4 | Upsert por SKU (id si existe) | Solo create | Evita duplicados al reimportar catálogo |
 | 2026-07-18 C6 | % carrito sobre neto tras dto. línea; reparto a discount_cents | % solo sobre bruto global en un campo sale | Reusa create_sale/VAT line-based sin migrar schema |
+| 2026-07-19 C8 | Partial return mutates returned_qty + refunded_cents; full cancel = return remaining | Documento de abono separado / ticket negativo | Menos schema; misma caja/stock; auditoría en líneas |
+| 2026-07-19 C8 | IVA dashboard netea por remainingLineAmounts | Dejar IVA bruto del ticket | Evita sobre-declarar base/IVA tras devoluciones |
+| 2026-07-19 C9 | Arqueo: sobrante→adjustment, faltante→expense categoría arqueo | Solo nota sin movimiento | Alinea saldo sistema con contado físico |
+| 2026-07-19 C9 | Cierre día: ventas display netas; net_cash usa bruto − gastos (incl. devoluciones) | Netear ventas y restar gastos de nuevo | Evita doble resta de reembolsos |

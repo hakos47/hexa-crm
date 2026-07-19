@@ -1,7 +1,8 @@
 import { writable, derived, get } from "svelte/store";
 import type { AuthUser, Company } from "$lib/types";
 
-const SESSION_KEY = "nix-c-session-v1";
+const SESSION_KEY = "hexa-crm-session-v1";
+const LEGACY_SESSION_KEY = "nix-c-session-v1";
 
 export type SessionState = {
   user: AuthUser | null;
@@ -16,7 +17,15 @@ function loadStored(): Pick<SessionState, "user" | "token"> {
     return { user: null, token: null };
   }
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    let raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) {
+      raw = sessionStorage.getItem(LEGACY_SESSION_KEY);
+      if (raw) {
+        // One-shot migrate to the new key.
+        sessionStorage.setItem(SESSION_KEY, raw);
+        sessionStorage.removeItem(LEGACY_SESSION_KEY);
+      }
+    }
     if (!raw) return { user: null, token: null };
     const parsed = JSON.parse(raw) as { user: AuthUser; token: string };
     if (parsed?.user && parsed?.token) return parsed;
@@ -89,6 +98,7 @@ export function clearSession() {
   }));
   if (typeof sessionStorage !== "undefined") {
     sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(LEGACY_SESSION_KEY);
   }
 }
 

@@ -44,6 +44,12 @@ import {
   validatePermanentPassword,
 } from "../auth/password-policy";
 import { countsInBusinessTotals, planCancelSale } from "../sales/cancel-sale";
+import {
+  netSaleTotalCents,
+  planPartialReturn,
+  remainingLineAmounts,
+  type ReturnLineRequest,
+} from "../sales/partial-return";
 import { extractOllamaReply, ollamaChatBody } from "../ai/ollama-reply";
 import {
   createBackupEnvelope,
@@ -52,7 +58,15 @@ import {
   type BackupEnvelope,
 } from "../backup/backup";
 
-const KEY = "nix-c-store-v5";
+const KEY = "hexa-crm-store-v5";
+/** Legacy localStorage keys (pre-rename) — read once, then persist under KEY. */
+const LEGACY_STORE_KEYS = [
+  "nix-c-store-v5",
+  "nix-c-store-v4",
+  "nix-c-store-v3",
+  "nix-c-store-v2",
+  "nix-c-store-v1",
+] as const;
 
 /** In-memory fallback when localStorage is unavailable (tests / SSR). */
 let memoryStore: Store | null = null;
@@ -246,11 +260,13 @@ function load(): Store {
     memoryStore.users = memoryStore.users.map(normalizeUser);
     return memoryStore;
   }
-  const raw =
-    localStorage.getItem(KEY) ??
-    localStorage.getItem("nix-c-store-v3") ??
-    localStorage.getItem("nix-c-store-v2") ??
-    localStorage.getItem("nix-c-store-v1");
+  let raw = localStorage.getItem(KEY);
+  if (!raw) {
+    for (const legacy of LEGACY_STORE_KEYS) {
+      raw = localStorage.getItem(legacy);
+      if (raw) break;
+    }
+  }
   if (!raw) {
     const s = seed();
     save(s);
@@ -290,6 +306,8 @@ function load(): Store {
       parsed.sessions[tok] = sess as SessionRec;
     }
     memoryStore = parsed;
+    // Migrate legacy keys onto the canonical KEY.
+    save(parsed);
     return parsed;
   } catch {
     const s = seed();
@@ -310,11 +328,20 @@ export function __resetBrowserStoreForTests() {
   memoryStore = null;
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(KEY);
-    localStorage.removeItem("nix-c-store-v4");
-    localStorage.removeItem("nix-c-store-v3");
-    localStorage.removeItem("nix-c-store-v2");
-    localStorage.removeItem("nix-c-store-v1");
+    for (const legacy of LEGACY_STORE_KEYS) {
+      localStorage.removeItem(legacy);
+    }
   }
+}
+
+/** Test helper: current localStorage product key (for rename/compat tests). */
+export function __browserStoreKeyForTests() {
+  return KEY;
+}
+
+/** Test helper: legacy product keys still readable once. */
+export function __legacyBrowserStoreKeysForTests() {
+  return [...LEGACY_STORE_KEYS];
 }
 
 /** Test helper: backdate temp password issuance for a username. */
@@ -445,7 +472,7 @@ export const browserApi = {
   /** Public: only shop display name for login screen. No secrets. */
   public_meta(): { shop_name: string } {
     const s = load();
-    return { shop_name: s.settings.shop_name || "Nix-C" };
+    return { shop_name: s.settings.shop_name || "hexa-crm" };
   },
 
   async login(username: string, password: string): Promise<LoginResult> {
@@ -845,6 +872,7 @@ export const browserApi = {
         product_id: product.id,
         product_name: product.name,
         qty: line.qty,
+        returned_qty: 0,
         unit_price_cents: unit,
         vat_rate: rate,
         line_base_cents: split.baseCents,
@@ -869,6 +897,7 @@ export const browserApi = {
       subtotal_cents: subtotal,
       vat_cents: vat,
       total_cents: total,
+      refunded_cents: 0,
       notes: notes ?? "",
       status: "completed",
     };
@@ -928,24 +957,76 @@ export const browserApi = {
   },
 
   cancel_sale(id: number, token?: string | null): Sale {
+    // Full void = return every remaining unit (works after partial returns).
+    const s = load();
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    const sale = s.sales.find((x) => x.id === id && (x.company_id ?? 1) === cid);
+    if (!sale) throw new Error("Venta no encontrada");
+    if (sale.status === "cancelled") throw new Error("La venta ya está anulada");
+    const lines = s.saleLines.filter((l) => l.sale_id === id);
+    const requests: ReturnLineRequest[] = lines
+      .map((l) => ({
+        line_id: l.id,
+        qty: Math.max(0, l.qty - (l.returned_qty ?? 0)),
+      }))
+      .filter((r) => r.qty > 0);
+    if (!requests.length) throw new Error("La venta ya está anulada");
+    // Full void = return all remaining units (same cash/stock path as partial).
+    // planCancelSale remains the pure-rules reference for tests; application is unified here.
+    if (sale.status === "completed" && !(sale.refunded_cents ?? 0)) {
+      planCancelSale(
+        {
+          id: sale.id,
+          number: sale.number,
+          status: sale.status,
+          total_cents: sale.total_cents,
+        },
+        lines.map((l) => ({ product_id: l.product_id, qty: l.qty })),
+      );
+    }
+    return this.return_sale_lines(id, requests, token);
+  },
+
+  return_sale_lines(
+    id: number,
+    requests: ReturnLineRequest[],
+    token?: string | null,
+  ): Sale {
     const s = load();
     ensureCompanies(s);
     const cid = sessionCompanyId(s, token);
     const sale = s.sales.find((x) => x.id === id && (x.company_id ?? 1) === cid);
     if (!sale) throw new Error("Venta no encontrada");
     const lines = s.saleLines.filter((l) => l.sale_id === id);
-    const plan = planCancelSale(
+    const plan = planPartialReturn(
       {
         id: sale.id,
         number: sale.number,
         status: sale.status,
         total_cents: sale.total_cents,
+        refunded_cents: sale.refunded_cents ?? 0,
       },
-      lines.map((l) => ({ product_id: l.product_id, qty: l.qty }))
+      lines.map((l) => ({
+        id: l.id,
+        product_id: l.product_id,
+        qty: l.qty,
+        returned_qty: l.returned_qty ?? 0,
+        line_total_cents: l.line_total_cents,
+        line_base_cents: l.line_base_cents,
+        line_vat_cents: l.line_vat_cents,
+      })),
+      requests,
     );
 
     const t = now();
     sale.status = plan.new_status;
+    sale.refunded_cents = plan.new_refunded_cents;
+
+    for (const pl of plan.lines) {
+      const line = lines.find((l) => l.id === pl.line_id);
+      if (line) line.returned_qty = pl.new_returned_qty;
+    }
 
     for (const r of plan.stock_restores) {
       const p = s.products.find((x) => x.id === r.product_id);
@@ -1028,10 +1109,19 @@ export const browserApi = {
       const d = sale.sold_at.slice(0, 10);
       if (d < from || d > to) continue;
       for (const line of s.saleLines.filter((l) => l.sale_id === sale.id)) {
+        const net = remainingLineAmounts({
+          id: line.id,
+          product_id: line.product_id,
+          qty: line.qty,
+          returned_qty: line.returned_qty ?? 0,
+          line_total_cents: line.line_total_cents,
+          line_base_cents: line.line_base_cents,
+          line_vat_cents: line.line_vat_cents,
+        });
         const b = bucketsMap.get(line.vat_rate)!;
-        b.base += line.line_base_cents;
-        b.vat += line.line_vat_cents;
-        b.total += line.line_total_cents;
+        b.base += net.base_cents;
+        b.vat += net.vat_cents;
+        b.total += net.total_cents;
       }
     }
 
@@ -1070,15 +1160,36 @@ export const browserApi = {
 
     for (const sale of filterByCompanyId(s.sales, cid)) {
       if (!countsInBusinessTotals(sale.status)) continue;
+      const netTotal = netSaleTotalCents({
+        total_cents: sale.total_cents,
+        refunded_cents: sale.refunded_cents ?? 0,
+        status: sale.status,
+      });
+      // Net base/VAT from remaining line quantities
+      let netVat = 0;
+      let netBase = 0;
+      for (const line of s.saleLines.filter((l) => l.sale_id === sale.id)) {
+        const rem = remainingLineAmounts({
+          id: line.id,
+          product_id: line.product_id,
+          qty: line.qty,
+          returned_qty: line.returned_qty ?? 0,
+          line_total_cents: line.line_total_cents,
+          line_base_cents: line.line_base_cents,
+          line_vat_cents: line.line_vat_cents,
+        });
+        netVat += rem.vat_cents;
+        netBase += rem.base_cents;
+      }
       if (dayKey(sale.sold_at) === today) {
-        sales_today_cents += sale.total_cents;
+        sales_today_cents += netTotal;
         sales_today_count += 1;
       }
       if (monthKey(sale.sold_at) === month) {
-        sales_month_cents += sale.total_cents;
+        sales_month_cents += netTotal;
         sales_month_count += 1;
-        vat_month_cents += sale.vat_cents;
-        base_month_cents += sale.subtotal_cents;
+        vat_month_cents += netVat;
+        base_month_cents += netBase;
       }
     }
 

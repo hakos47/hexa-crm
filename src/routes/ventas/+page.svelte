@@ -208,21 +208,47 @@
     }
   }
 
+  let cancelling = $state(false);
+  let returning = $state(false);
+  /** qty to return per line id (historial partial return) */
+  let returnQtyByLine = $state<Record<number, number>>({});
+
+  function remainingLineQty(line: {
+    id: number;
+    qty: number;
+    returned_qty?: number;
+  }): number {
+    return Math.max(0, line.qty - (line.returned_qty ?? 0));
+  }
+
+  function syncReturnQtyDefaults(sale: Sale) {
+    const next: Record<number, number> = {};
+    for (const line of sale.lines ?? []) {
+      const rem = remainingLineQty(line);
+      next[line.id] = rem > 0 ? 0 : 0;
+    }
+    returnQtyByLine = next;
+  }
+
   async function openSale(id: number) {
     try {
       selectedSale = await api.getSale(id);
+      if (selectedSale) syncReturnQtyDefaults(selectedSale);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
     }
   }
 
-  let cancelling = $state(false);
-
   async function cancelSelected() {
-    if (!selectedSale || selectedSale.status !== "completed") return;
+    if (
+      !selectedSale ||
+      (selectedSale.status !== "completed" && selectedSale.status !== "partially_returned")
+    ) {
+      return;
+    }
     if (
       !confirm(
-        `¿Anular el ticket ${selectedSale.number}? Se restaurará el stock y se registrará un gasto de caja por ${formatEUR(selectedSale.total_cents)}.`
+        `¿Anular el resto del ticket ${selectedSale.number}? Se restaurará el stock pendiente y se registrará el reembolso en caja.`,
       )
     ) {
       return;
@@ -231,11 +257,50 @@
     try {
       selectedSale = await api.cancelSale(selectedSale.id);
       showToast(`Ticket ${selectedSale.number} anulado`);
+      syncReturnQtyDefaults(selectedSale);
       await load();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error al anular", "err");
     } finally {
       cancelling = false;
+    }
+  }
+
+  async function returnSelectedLines() {
+    if (!selectedSale) return;
+    if (
+      selectedSale.status !== "completed" &&
+      selectedSale.status !== "partially_returned"
+    ) {
+      return;
+    }
+    const lines = (selectedSale.lines ?? [])
+      .map((l) => ({
+        line_id: l.id,
+        qty: Math.min(returnQtyByLine[l.id] ?? 0, remainingLineQty(l)),
+      }))
+      .filter((r) => r.qty > 0);
+    if (!lines.length) {
+      showToast("Indica la cantidad a devolver en al menos una línea", "info");
+      return;
+    }
+    if (
+      !confirm(
+        `¿Devolver ${lines.reduce((a, l) => a + l.qty, 0)} unidad(es) del ticket ${selectedSale.number}?`,
+      )
+    ) {
+      return;
+    }
+    returning = true;
+    try {
+      selectedSale = await api.returnSaleLines(selectedSale.id, lines);
+      showToast(`Devolución registrada en ${selectedSale.number}`);
+      syncReturnQtyDefaults(selectedSale);
+      await load();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Error al devolver", "err");
+    } finally {
+      returning = false;
     }
   }
 </script>
@@ -421,6 +486,8 @@
                     {s.number}
                     {#if s.status === "cancelled"}
                       <Badge tone="danger">anulada</Badge>
+                    {:else if s.status === "partially_returned"}
+                      <Badge tone="warn">parcial</Badge>
                     {/if}
                   </td>
                   <td class="px-3 py-3 text-[var(--color-muted)] sm:px-4">
@@ -432,6 +499,11 @@
                       : 'text-radiant'}"
                   >
                     {formatEUR(s.total_cents)}
+                    {#if (s.refunded_cents ?? 0) > 0 && s.status !== "cancelled"}
+                      <span class="mt-0.5 block text-[10px] text-[var(--color-muted-dim)]">
+                        −{formatEUR(s.refunded_cents ?? 0)} dev.
+                      </span>
+                    {/if}
                   </td>
                   <td class="px-3 py-3 text-right sm:px-4">
                     <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openSale(s.id)}>
@@ -458,36 +530,74 @@
               {selectedSale.number}
               {#if selectedSale.status === "cancelled"}
                 <Badge tone="danger">anulada</Badge>
+              {:else if selectedSale.status === "partially_returned"}
+                <Badge tone="warn">parcial</Badge>
               {/if}
             </h2>
             <p class="text-xs text-[var(--color-muted-dim)]">
               {new Date(selectedSale.sold_at).toLocaleString("es-ES")}
             </p>
           </div>
-          {#if selectedSale.status === "completed"}
-            <Button
-              variant="danger"
-              class="!px-2 !py-1 text-xs"
-              disabled={cancelling}
-              onclick={cancelSelected}
-            >
-              {cancelling ? "Anulando…" : "Anular ticket"}
-            </Button>
+          {#if selectedSale.status === "completed" || selectedSale.status === "partially_returned"}
+            <div class="flex flex-wrap gap-1.5">
+              <Button
+                variant="secondary"
+                class="!px-2 !py-1 text-xs"
+                disabled={returning || cancelling}
+                onclick={returnSelectedLines}
+              >
+                {returning ? "Devolviendo…" : "Devolver líneas"}
+              </Button>
+              <Button
+                variant="danger"
+                class="!px-2 !py-1 text-xs"
+                disabled={cancelling || returning}
+                onclick={cancelSelected}
+              >
+                {cancelling ? "Anulando…" : "Anular resto"}
+              </Button>
+            </div>
           {/if}
         </div>
-        <ul class="mt-3 space-y-2">
+        <ul class="mt-3 space-y-2" data-sale-return-panel>
           {#each selectedSale.lines ?? [] as line}
+            {@const rem = remainingLineQty(line)}
             <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">
               <div class="flex flex-wrap justify-between gap-2">
                 <span class="min-w-0 break-words"
-                  >{line.product_name ?? `Prod #${line.product_id}`} × {line.qty}</span
-                >
+                  >{line.product_name ?? `Prod #${line.product_id}`} × {line.qty}
+                  {#if (line.returned_qty ?? 0) > 0}
+                    <span class="text-[var(--color-muted-dim)]"
+                      >(dev. {line.returned_qty}, quedan {rem})</span
+                    >
+                  {/if}
+                </span>
                 <span class="tabular shrink-0">{formatEUR(line.line_total_cents)}</span>
               </div>
               <p class="text-xs text-[var(--color-muted-dim)]">
                 Base {formatEUR(line.line_base_cents)} · IVA {line.vat_rate}%
                 {formatEUR(line.line_vat_cents)}
               </p>
+              {#if (selectedSale.status === "completed" || selectedSale.status === "partially_returned") && rem > 0}
+                <label class="mt-2 flex items-center gap-2 text-xs text-[var(--color-muted)]">
+                  <span class="shrink-0">Devolver</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={rem}
+                    class="field !w-16 !px-2 !py-1 text-xs"
+                    value={returnQtyByLine[line.id] ?? 0}
+                    oninput={(e) => {
+                      const v = Math.max(
+                        0,
+                        Math.min(rem, Math.floor(Number((e.currentTarget as HTMLInputElement).value) || 0)),
+                      );
+                      returnQtyByLine = { ...returnQtyByLine, [line.id]: v };
+                    }}
+                  />
+                  <span class="text-[var(--color-muted-dim)]">/ {rem} ud.</span>
+                </label>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -499,8 +609,22 @@
             <span>IVA</span><span class="tabular">{formatEUR(selectedSale.vat_cents)}</span>
           </div>
           <div class="flex justify-between font-semibold text-radiant">
-            <span>Total</span><span class="tabular">{formatEUR(selectedSale.total_cents)}</span>
+            <span>Total ticket</span><span class="tabular">{formatEUR(selectedSale.total_cents)}</span>
           </div>
+          {#if (selectedSale.refunded_cents ?? 0) > 0}
+            <div class="flex justify-between text-sm text-rose-200/90">
+              <span>Devuelto</span>
+              <span class="tabular">−{formatEUR(selectedSale.refunded_cents ?? 0)}</span>
+            </div>
+            <div class="flex justify-between font-medium text-[var(--color-text)]">
+              <span>Neto</span>
+              <span class="tabular">
+                {formatEUR(
+                  Math.max(0, selectedSale.total_cents - (selectedSale.refunded_cents ?? 0)),
+                )}
+              </span>
+            </div>
+          {/if}
         </div>
       {/if}
     </Card>

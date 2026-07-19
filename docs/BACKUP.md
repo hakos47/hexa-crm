@@ -8,7 +8,7 @@ Evitar pérdida de datos de negocio por fallo local, migración o error humano.
 
 | Campo | Valor |
 |-------|--------|
-| Formato | `nix-c-backup` |
+| Formato | `hexa-crm-backup` |
 | Versión | `1` |
 | Integridad | SHA-256 del JSON canónico del `payload` |
 | Módulo | `src/lib/backup/backup.ts` |

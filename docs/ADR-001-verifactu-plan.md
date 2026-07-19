@@ -6,7 +6,7 @@
 
 ## Contexto
 
-Nix-C es un CRM/TPV **local-first** para microcomercio en España. Hoy registra:
+hexa-crm es un CRM/TPV **local-first** para microcomercio en España. Hoy registra:
 
 - tickets de venta (totales base/IVA/total en céntimos),
 - movimientos de caja,
@@ -69,7 +69,7 @@ Migraciones: **nunca** reescribir ventas históricas `sales`; las facturas legal
 ## Estrategia de firma / QR / exportación
 
 - **Fase diseño:** definir campos mínimos y formato de exportación según documentación AEAT vigente en el momento de implementación.
-- **Fase implementación (futura):** valorar software homologado o API de tercero; Nix-C como cliente, no como “homologación casera”.
+- **Fase implementación (futura):** valorar software homologado o API de tercero; hexa-crm como cliente, no como “homologación casera”.
 - **QR / huella:** solo cuando el formato oficial esté implementado y revisado.
 
 ## Qué queda en la UI actual

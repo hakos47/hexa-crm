@@ -1,9 +1,9 @@
 # STATE
 
-- Ciclo: **7**
-- Fecha cierre: 2026-07-19T09:36
+- Ciclo: **9**
+- Fecha cierre: 2026-07-19T17:32
 - Estado: **CYCLE_COMPLETE**
-- Área auditada: **multi-empresa P0 slice** (Company Tenant)
+- Área auditada: **6 — Caja · arqueo / conciliación (B8) + fix cierre con devoluciones**
 - Bloqueos: ninguno
-- Siguiente área candidata: **billing UI consolidado** o **devolución parcial**
-- Rama: `feat/ci-cycle-7` → merge a `dev`
+- Siguiente área candidata: **clientes** o **M1b settings por empresa** o **Tauri return parity**
+- Rama: `dev` (local)

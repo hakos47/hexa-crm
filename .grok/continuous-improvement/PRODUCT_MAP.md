@@ -1,4 +1,4 @@
-# PRODUCT_MAP — Nix-C
+# PRODUCT_MAP — hexa-crm
 
 ## Usuarios
 - Dueño/admin de tienda física (ES): inventario, IVA, caja, usuarios
@@ -17,8 +17,8 @@
 | Auth | login / force PW | estable |
 | Dashboard | / | KPIs + stock bajo |
 | Inventario | /inventario | categorías + stock |
-| Ventas | /ventas | TPV + dto. línea + historial + void + CSV |
-| Caja | /caja | movimientos + cierre día |
+| Ventas | /ventas | TPV + dto. línea/% carrito + historial + void + **devolución parcial** + CSV |
+| Caja | /caja | movimientos + cierre día + **arqueo** |
 | Clientes | /clientes | CRM ligero |
 | Impuestos | /impuestos | libro IVA + CSV |
 | Ajustes | /ajustes | tienda, Ollama, users |

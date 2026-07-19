@@ -1,6 +1,6 @@
 # Herramientas (tools)
 
-Utilidades que rodean el CRM Nix-C y se mantienen **separadas del core** de la app para poder arreglarlas o versionarlas sin mezclar UI/Svelte.
+Utilidades que rodean el CRM hexa-crm y se mantienen **separadas del core** de la app para poder arreglarlas o versionarlas sin mezclar UI/Svelte.
 
 | Carpeta | Qué es |
 |---------|--------|

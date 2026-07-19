@@ -61,7 +61,10 @@ export function planCancelSale(
   };
 }
 
-/** Whether aggregates (dashboard, IVA) should include this sale. */
+/**
+ * Whether aggregates (dashboard, IVA) should include this sale.
+ * Partial returns stay counted; net amounts use refunded_cents / remaining qty.
+ */
 export function countsInBusinessTotals(status: string): boolean {
-  return status === "completed";
+  return status === "completed" || status === "partially_returned";
 }

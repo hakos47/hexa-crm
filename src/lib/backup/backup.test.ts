@@ -49,6 +49,17 @@ describe("backup envelope", () => {
     expect(j.ok).toBe(false);
   });
 
+  it("accepts legacy hexa-crm-backup format and normalizes to hexa-crm-backup", async () => {
+    const env = await createBackupEnvelope(demoStore);
+    const legacy = { ...env, format: "nix-c-backup" as const };
+    const v = await validateBackup(legacy);
+    expect(v.ok).toBe(true);
+    if (v.ok) {
+      expect(v.envelope.format).toBe(BACKUP_FORMAT);
+      expect(v.envelope.payload).toEqual(demoStore);
+    }
+  });
+
   it("pre-migration backup wraps store with reason", async () => {
     const env = await createPreMigrationBackup(demoStore, "schema v2");
     const v = await validateBackup(env);

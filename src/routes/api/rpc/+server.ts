@@ -98,6 +98,13 @@ export const POST: RequestHandler = async ({ request }) => {
       case "cancel_sale":
         result = await postgresApi.cancel_sale(args?.id as number, token);
         break;
+      case "return_sale_lines":
+        result = await postgresApi.return_sale_lines(
+          args?.id as number,
+          (args?.lines as { line_id: number; qty: number }[]) ?? [],
+          token,
+        );
+        break;
       case "list_cash_movements":
         result = await postgresApi.list_cash_movements(token);
         break;

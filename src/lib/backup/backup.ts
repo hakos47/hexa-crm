@@ -3,7 +3,9 @@
  * Pure helpers — no DOM side effects — for testable integrity.
  */
 
-export const BACKUP_FORMAT = "nix-c-backup" as const;
+export const BACKUP_FORMAT = "hexa-crm-backup" as const;
+/** Pre-rename format still accepted on restore. */
+export const LEGACY_BACKUP_FORMAT = "nix-c-backup" as const;
 export const BACKUP_VERSION = 1 as const;
 
 export type BackupEnvelope = {
@@ -49,7 +51,7 @@ export async function validateBackup(raw: unknown): Promise<BackupValidation> {
     return { ok: false, error: "Copia inválida: no es un objeto JSON." };
   }
   const env = raw as Partial<BackupEnvelope>;
-  if (env.format !== BACKUP_FORMAT) {
+  if (env.format !== BACKUP_FORMAT && env.format !== LEGACY_BACKUP_FORMAT) {
     return {
       ok: false,
       error: `Formato desconocido (${String(env.format)}). Se espera "${BACKUP_FORMAT}".`,

@@ -1,8 +1,8 @@
-# Análisis multi-empresa — Nix-C para estudio de desarrollo + tienda de compraventa
+# Análisis multi-empresa — hexa-crm para estudio de desarrollo + tienda de compraventa
 
 **Fecha:** 2026-07-18  
 **Tipo:** análisis de producto / arquitectura (sin implementación multi-org en este entregable)  
-**Producto base:** Nix-C (hexa-crm) — CRM/TPV local-first, control interno de ventas/caja/IVA  
+**Producto base:** hexa-crm — CRM/TPV local-first, control interno de ventas/caja/IVA  
 **Fiscal:** ver [ADR-001 VeriFactu](./ADR-001-verifactu-plan.md) — **no** se reclama facturación electrónica homologada
 
 ---
@@ -11,7 +11,7 @@
 
 ### 1.1 Las dos líneas de actividad
 
-| Código | Negocio | Actividad típica | Canal principal en Nix-C |
+| Código | Negocio | Actividad típica | Canal principal en hexa-crm |
 |--------|---------|------------------|---------------------------|
 | **DEV** | Empresa de **desarrollo de aplicaciones** (estudio/software) | Proyectos, servicios, licencias, mantenimiento, facturas a clientes B2B/B2C de software | Ventas “de servicio” / presupuestos → facturas (futuro), clientes, IVA servicios |
 | **SHOP** | **Tienda de compraventa** (segunda mano / retail físico) | TPV, stock de piezas/productos, caja diaria, tickets de mostrador | Inventario, ventas TPV, caja, cierre día, IVA bienes |
@@ -135,7 +135,7 @@ Feature flags por `company.kind` evitan forzar un TPV de compraventa al estudio 
 
 ---
 
-## 3. Gaps priorizados vs Nix-C **actual**
+## 3. Gaps priorizados vs hexa-crm **actual**
 
 ### 3.1 Realidad del producto hoy (verificación en código)
 
@@ -272,6 +272,6 @@ Fórmula orientativa: impacto negocio × urgencia legal/comercial / esfuerzo.
 
 ## 7. Resumen ejecutivo (una página)
 
-Tenéis **dos negocios** (estudio de apps + compraventa) que deben **facturar e informar IVA por separado**, pero podéis operar en **un solo Nix-C** con aislamiento **Company Tenant**: cada venta, caja, stock y setting lleva `company_id`; los usuarios se asignan por membresía; el dueño cambia de empresa y ve **totales por empresa** (y un consolidado de gestión).  
+Tenéis **dos negocios** (estudio de apps + compraventa) que deben **facturar e informar IVA por separado**, pero podéis operar en **un solo hexa-crm** con aislamiento **Company Tenant**: cada venta, caja, stock y setting lleva `company_id`; los usuarios se asignan por membresía; el dueño cambia de empresa y ve **totales por empresa** (y un consolidado de gestión).  
 
-Hoy Nix-C es **single-shop** (`shop_name`, un pipeline de ventas/caja/IVA, sin `org_id`). El trabajo prioritario es **P0: schema + sesión + filtros + informe “billing by company” + tests anti-fuga**. La facturación electrónica / Veri*Factu es **posterior** y **por NIF emisor**, nunca mezclando series de DEV y SHOP.
+Hoy hexa-crm es **single-shop** (`shop_name`, un pipeline de ventas/caja/IVA, sin `org_id`). El trabajo prioritario es **P0: schema + sesión + filtros + informe “billing by company” + tests anti-fuga**. La facturación electrónica / Veri*Factu es **posterior** y **por NIF emisor**, nunca mezclando series de DEV y SHOP.

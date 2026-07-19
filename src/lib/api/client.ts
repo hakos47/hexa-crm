@@ -117,6 +117,8 @@ export const api = {
   listSales: () => call<Sale[]>("list_sales"),
   getSale: (id: number) => call<Sale>("get_sale", { id }),
   cancelSale: (id: number) => call<Sale>("cancel_sale", { id }),
+  returnSaleLines: (id: number, lines: { line_id: number; qty: number }[]) =>
+    call<Sale>("return_sale_lines", { id, lines }),
   listCashMovements: () => call<CashMovement[]>("list_cash_movements"),
   createCashMovement: (input: CashInput) => call<CashMovement>("create_cash_movement", { input }),
   getCashBalance: () => call<number>("get_cash_balance"),

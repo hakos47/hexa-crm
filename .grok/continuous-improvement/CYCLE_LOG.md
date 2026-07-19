@@ -1,5 +1,52 @@
 # CYCLE_LOG
 
+## CICLO 9 — 2026-07-19
+
+```
+CICLO 9 — 2026-07-19
+Área auditada: 6 — Caja (arqueo B8 + fix cierre con partial returns)
+Cambio de mercado / evidencia:
+  - POS retail: arqueo físico vs sistema es cierre de turno estándar
+  - BACKLOG B8; FEATURE_AUDIT caja sin conciliación
+  - Bug: buildDailyCloseReport ignoraba partially_returned (ciclo 8)
+Problema: sin contado físico ni descuadre; cierre de día incompleto tras devoluciones
+Hipótesis: planCashReconcile(expected, counted) + fix daily-close net/gross
+Cambios:
+  - src/lib/reports/cash-reconcile.ts (+ tests)
+  - daily-close: partially_returned, sales_gross/net, cash sin doble resta
+  - caja/+page.svelte: panel Arqueo + post adjustment/expense categoría arqueo
+  - caja-ui structural tests
+Pruebas: 141/141 (baseline 132 → +9)
+Antes → después: solo saldo+movimientos → arqueo contado/diferencia + cierre neto correcto
+Riesgos: adjustment solo (+); faltante como expense; no historial de arqueos persistente aparte
+Siguiente: clientes ficha o M1b settings empresa o Tauri return
+Estado: CYCLE_COMPLETE
+```
+
+## CICLO 8 — 2026-07-19
+
+```
+CICLO 8 — 2026-07-19
+Área auditada: 5 — Ventas/TPV (devolución parcial de líneas B6)
+Cambio de mercado / evidencia:
+  - POS retail ES: devolución parcial de líneas es flujo estándar (no solo void total)
+  - BACKLOG B6; FEATURE_AUDIT anulación total sin partial
+  - Evidencia producto: historial solo "Anular ticket" completo
+Problema: cajero no puede devolver 1 de N unidades sin anular el ticket entero
+Hipótesis: planPartialReturn(qty) → stock + caja + returned_qty + status; IVA/dashboard netos
+Cambios:
+  - src/lib/sales/partial-return.ts (+ tests 8)
+  - browser-store return_sale_lines; cancel = remaining return
+  - postgres columns refunded_cents/returned_qty + RPC return_sale_lines
+  - client + ventas historial UI (qty por línea)
+  - countsInBusinessTotals incluye partially_returned; VAT/dashboard netean
+Pruebas: 132/132 (baseline 121 → +11)
+Antes → después: solo void total → devolución parcial multi-línea + anular resto
+Riesgos: Tauri/Rust sin comando return; PG vat_summary/dashboard net incompletos si no usan remainingLineAmounts
+Siguiente: caja arqueo o M1b settings por empresa o Tauri parity
+Estado: CYCLE_COMPLETE
+```
+
 ## CICLO 7 — 2026-07-19
 
 ```
@@ -61,7 +108,7 @@ Cambios realizados:
   - Redesign completo src/routes/ajustes/+page.svelte (misma lógica API)
   - Tests estructurales ajustes-layout.test.ts (4)
 Pruebas: npm test; npm run check 0 errors
-Antes → después: formulario genérico → shell Nix-C (section-label, pills, danger zone)
+Antes → después: formulario genérico → shell hexa-crm (section-label, pills, danger zone)
 Riesgos: solo visual; sin E2E browser screenshot en CI
 Elementos aparcados: B3 % carrito; multi-empresa P0
 Siguiente área candidata: B3 descuento % carrito global
