@@ -23,6 +23,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - TPV express con hasta ocho favoritos persistentes, chips táctiles y atajos F2/Esc (#15).
 - Ficha de cliente con valor neto, frecuencia, última compra, segmento e inicio de venta preseleccionado (#17).
 - Dashboard con deltas diarios, tendencia de siete días y alertas enlazadas (#13).
+- Copiloto local con herramientas de ventas, stock y reposición basadas en datos reales (#14).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

@@ -60,6 +60,11 @@
     "¿Qué productos debo reponer?",
     "¿Cómo va la caja este mes?",
   ];
+  const toolActions = [
+    { label: "Resumen real", prompt: "Usa get_dashboard_stats y sales_summary para resumir el día" },
+    { label: "Stock bajo", prompt: "Usa list_low_stock y dime qué debo reponer" },
+    { label: "Pedido sugerido", prompt: "Usa suggest_reorder y prepara un pedido breve" },
+  ];
 
   async function refreshDashboardData() {
     try {
@@ -432,6 +437,14 @@
                     {s}
                   </button>
                 {/each}
+              </div>
+              <div class="mt-3 rounded-xl border border-purple-400/20 bg-purple-500/5 p-2.5" data-ai-tools>
+                <p class="mb-2 text-[11px] font-medium text-[var(--color-muted)]">Herramientas con datos de la empresa activa</p>
+                <div class="flex flex-wrap gap-2">
+                  {#each toolActions as action}
+                    <button type="button" class="min-h-9 rounded-lg border border-[var(--color-border)] px-2.5 text-xs text-radiant hover:bg-purple-500/10" onclick={() => send(action.prompt)}>{action.label}</button>
+                  {/each}
+                </div>
               </div>
             {/if}
 

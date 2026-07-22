@@ -1275,7 +1275,9 @@ export const postgresApi = {
   },
 
   async dashboard_stats(token: string | null): Promise<DashboardStats & { sales_yesterday_cents?: number }> {
-    await requireSession(token);
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
     const monthStr = todayStr.slice(0, 7);
@@ -1295,6 +1297,7 @@ export const postgresApi = {
              COUNT(*)::int as count
       FROM sales
       WHERE status IN ('completed', 'partially_returned')
+        AND company_id = ${cid}
         AND sold_at >= ${startToday} AND sold_at <= ${endToday}
     `;
 
@@ -1303,6 +1306,7 @@ export const postgresApi = {
              COUNT(*)::int as count
       FROM sales
       WHERE status IN ('completed', 'partially_returned')
+        AND company_id = ${cid}
         AND sold_at >= ${startYesterday} AND sold_at <= ${endYesterday}
     `;
 
@@ -1313,7 +1317,7 @@ export const postgresApi = {
         COALESCE(SUM(subtotal_cents), 0)::int as base,
         COUNT(*)::int as count
       FROM sales
-      WHERE status IN ('completed', 'partially_returned') AND sold_at >= ${startMonth}
+      WHERE status IN ('completed', 'partially_returned') AND company_id = ${cid} AND sold_at >= ${startMonth}
     `;
 
     const cash = await this.get_cash_balance(token);
@@ -1321,7 +1325,7 @@ export const postgresApi = {
     const lowRows = await sql`
       SELECT *
       FROM products
-      WHERE active = TRUE AND stock <= min_stock
+      WHERE active = TRUE AND company_id = ${cid} AND stock <= min_stock
       ORDER BY stock ASC, name ASC
     `;
 

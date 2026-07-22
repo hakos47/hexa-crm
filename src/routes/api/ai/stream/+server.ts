@@ -1,5 +1,6 @@
 import type { RequestHandler } from "@sveltejs/kit";
-import { postgresApi, sql } from "$lib/api/postgres-db";
+import { postgresApi } from "$lib/api/postgres-db";
+import { storeTools } from "$lib/ai/store-tools";
 
 export const POST: RequestHandler = async ({ request }) => {
   const authHeader = request.headers.get("Authorization");
@@ -26,17 +27,13 @@ export const POST: RequestHandler = async ({ request }) => {
       });
     }
 
-    const settings = await postgresApi.get_settings(token);
-    const stats = await postgresApi.dashboard_stats(token);
-    
-    // Obtener productos de bajo stock
-    const lowStockProds = await sql`
-      SELECT name, stock, price_cents
-      FROM products
-      WHERE active = TRUE
-      ORDER BY stock ASC
-      LIMIT 10
-    `;
+    const [settings, stats, products, sales] = await Promise.all([
+      postgresApi.get_settings(token),
+      postgresApi.dashboard_stats(token),
+      postgresApi.list_products(true, token),
+      postgresApi.list_sales(token),
+    ]);
+    const tools = storeTools(stats, products, sales);
 
     const todayStr = new Date().toISOString().slice(0, 10);
     const context = {
@@ -49,9 +46,7 @@ export const POST: RequestHandler = async ({ request }) => {
       tickets_mes: stats.sales_month_count,
       caja_eur: (stats.cash_balance_cents / 100).toFixed(2),
       iva_mes_eur: (stats.vat_month_cents / 100).toFixed(2),
-      productos_bajo_stock: lowStockProds.map(
-        (p) => `${p.name} (${p.stock} uds - ${(p.price_cents / 100).toFixed(2)}€)`,
-      ),
+      tools,
     };
 
     const systemPrompt = `Te llamas Lucía y eres la asistente virtual inteligente de la tienda "${settings.shop_name}" en España. 
@@ -63,7 +58,7 @@ Tus habilidades en este CRM incluyen:
 - Calcular desgloses de impuestos e IVA (0%, 4%, 10%, 21% de España).
 - Apoyar en operaciones de ventas y facturación de mostrador.
 Precios en EUR con IVA incluido. Contexto de negocio actual (JSON compacto): ${JSON.stringify(context)}.
-No inventes datos fuera de este contexto. Si falta información, indícalo educadamente.`;
+Los resultados de tools son datos reales de la empresa activa: cítalos tal cual y no inventes cifras. No presentes orientación fiscal como asesoramiento legal o fiscal profesional; recomienda confirmarla con una asesoría. Si falta información, indícalo educadamente.`;
 
     const payloadMsgs = [
       { role: "system", content: systemPrompt },
