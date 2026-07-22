@@ -346,6 +346,14 @@ export async function initDb() {
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
     await sql.unsafe(`CREATE POLICY ${policy} ON ${table} USING (company_id = NULLIF(current_setting('app.company_id', true), '')::integer) WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::integer)`);
   }
+  // Child rows inherit tenant scope from their parent. These policies prevent a
+  // direct query against a line table from bypassing the parent's RLS policy.
+  await sql`ALTER TABLE reservation_lines ENABLE ROW LEVEL SECURITY`;
+  await sql`DROP POLICY IF EXISTS reservation_lines_tenant_isolation ON reservation_lines`;
+  await sql`CREATE POLICY reservation_lines_tenant_isolation ON reservation_lines USING (EXISTS (SELECT 1 FROM reservations WHERE reservations.id = reservation_lines.reservation_id AND reservations.company_id = NULLIF(current_setting('app.company_id', true), '')::integer)) WITH CHECK (EXISTS (SELECT 1 FROM reservations WHERE reservations.id = reservation_lines.reservation_id AND reservations.company_id = NULLIF(current_setting('app.company_id', true), '')::integer))`;
+  await sql`ALTER TABLE order_lines ENABLE ROW LEVEL SECURITY`;
+  await sql`DROP POLICY IF EXISTS order_lines_tenant_isolation ON order_lines`;
+  await sql`CREATE POLICY order_lines_tenant_isolation ON order_lines USING (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_lines.order_id AND orders.company_id = NULLIF(current_setting('app.company_id', true), '')::integer)) WITH CHECK (EXISTS (SELECT 1 FROM orders WHERE orders.id = order_lines.order_id AND orders.company_id = NULLIF(current_setting('app.company_id', true), '')::integer))`;
   // Partial returns (ciclo 8)
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
