@@ -26,6 +26,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Copiloto local con herramientas de ventas, stock y reposición basadas en datos reales (#14).
 - Base de API central v1 con OpenAPI, health/readiness y receta PostgreSQL 18 + pgvector (#26).
 - Índice semántico privado por tenant, sin clientes ni ventas, preparado para embeddings locales (#32).
+- Catálogo central con estado de publicación y metadatos de producto para el tenant Meiga (#28).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

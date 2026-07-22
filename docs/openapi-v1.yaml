@@ -14,7 +14,7 @@ paths:
         '503': { description: API viva pero dependencia no preparada }
   /products:
     get:
-      summary: Feed paginado de catálogo publicado
+      summary: Feed paginado de catálogo publicado; nunca devuelve borradores, archivados ni otro tenant
       security: [{ serviceHmac: [] }]
       parameters:
         - { name: cursor, in: query, schema: { type: string } }

@@ -23,8 +23,9 @@ export const GET: RequestHandler = async ({ request, url }) => {
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
   const cursor = Math.max(0, Number(url.searchParams.get("cursor") ?? 0) || 0);
   const products = await sql`
-    SELECT id, sku, name, description, category, stock, min_stock, price_cents, vat_rate, active, updated_at
-    FROM products WHERE company_id = ${tenant[0].id} AND active = TRUE AND id > ${cursor}
+    SELECT id, sku, name, description, category, stock, min_stock, price_cents, vat_rate, currency,
+           condition_code, image_url, evidence, publication_status, updated_at
+    FROM products WHERE company_id = ${tenant[0].id} AND active = TRUE AND publication_status = 'published' AND id > ${cursor}
     ORDER BY id ASC LIMIT ${limit + 1}
   `;
   const hasNext = products.length > limit;

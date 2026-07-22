@@ -309,6 +309,14 @@ export async function initDb() {
   await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE cash_movements ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
+  // Central catalog metadata. Existing local products remain published by default.
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS publication_status TEXT NOT NULL DEFAULT 'published'`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS condition_code TEXT NOT NULL DEFAULT 'preowned'`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
+  await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Partial returns (ciclo 8)
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
@@ -318,7 +326,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0005_semantic_index') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0006_central_catalog') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {
