@@ -79,3 +79,12 @@ export function downloadCsv(filename: string, csv: string): void {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export function reorderSuggestionsToCsv(
+  suggestions: { sku: string; name: string; stock: number; min_stock: number; qty_suggested: number }[],
+): string {
+  return toCsv([
+    ["sku", "producto", "stock_actual", "stock_minimo", "cantidad_sugerida"],
+    ...suggestions.map((s) => [s.sku, s.name, s.stock, s.min_stock, s.qty_suggested]),
+  ]);
+}

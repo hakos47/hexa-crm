@@ -13,7 +13,7 @@
 {#if withWordmark}
   <img
     src="/logo.svg"
-    alt="Nix-C"
+    alt="hexa-crm"
     width={Math.round(size * 3.4)}
     height={size}
     class="select-none {className}"
@@ -22,7 +22,7 @@
 {:else}
   <img
     src="/logo-mark.svg"
-    alt="Nix-C"
+    alt="hexa-crm"
     width={size}
     height={size}
     class="select-none shrink-0 {className}"

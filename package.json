@@ -1,8 +1,31 @@
 {
-  "name": "nix-c",
-  "version": "0.1.0",
-  "description": "CRM de tienda local — inventario, ventas, caja, IVA ES e IA con Ollama",
+  "name": "hexa-crm",
+  "version": "0.2.0",
+  "description": "CRM/TPV local-first open source \u2014 inventario, ventas, caja, IVA ES e IA con Ollama",
   "type": "module",
+  "private": false,
+  "license": "MIT",
+  "author": "HEXA-NIX contributors",
+  "homepage": "https://github.com/HEXA-NIX/hexa-crm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HEXA-NIX/hexa-crm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HEXA-NIX/hexa-crm/issues"
+  },
+  "keywords": [
+    "pos",
+    "tpv",
+    "crm",
+    "retail",
+    "local-first",
+    "svelte",
+    "tauri",
+    "sqlite",
+    "spain",
+    "open-source"
+  ],
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -14,19 +37,28 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "prepare": "bash scripts/install-git-hooks.sh || true",
-    "hooks:install": "bash scripts/install-git-hooks.sh"
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "mcp:install": "npm install --prefix tools/mcp",
+    "mcp:build": "npm run build --prefix tools/mcp",
+    "mcp:dev": "npm run dev --prefix tools/mcp",
+    "central:provision-tenant": "node scripts/provision-central-tenant.mjs",
+    "central:provision-api-role": "node scripts/provision-central-api-role.mjs",
+    "central:verify-backup": "bash scripts/verify-central-backup-restore.sh",
+    "central:provision-operator": "node scripts/provision-central-operator.mjs"
   },
-  "license": "MIT",
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "marked": "^18.0.6",
+    "postgres": "^3.4.4"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.6",
+    "@sveltejs/adapter-node": "^5.5.7",
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tauri-apps/cli": "^2",
     "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.1.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.0.0",

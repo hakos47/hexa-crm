@@ -1,26 +1,41 @@
 <script lang="ts">
   import "../app.css";
-  import { onMount } from "svelte";
+  import { onMount, type Component } from "svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
-  import AiDrawer from "$lib/components/AiDrawer.svelte";
   import Toast from "$lib/components/Toast.svelte";
   import Button from "$lib/components/Button.svelte";
   import LoginScreen from "$lib/components/LoginScreen.svelte";
   import ForcePasswordChange from "$lib/components/ForcePasswordChange.svelte";
+  import OnboardingWizard from "$lib/components/OnboardingWizard.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import { openAiChat } from "$lib/stores/ui";
   import {
     session,
     clearSession,
     setSession,
+    setActiveCompanyLocal,
     markSessionReady,
     mustChangePassword,
+    activeCompany,
+    idleTimeoutMinutes,
+    setIdleTimeoutMinutes,
   } from "$lib/stores/session";
+  import { idleTimeoutMs } from "$lib/auth/idle-timeout";
   import { api } from "$lib/api/client";
+  import { configureRemoteOperator } from "$lib/api/client";
   import { page } from "$app/stores";
+  import { showToast } from "$lib/stores/ui";
+  import { isOnboardingDone } from "$lib/onboarding/state";
+  import { PRODUCT_DISPLAY_NAME } from "$lib/product";
+  import { initTheme, theme, toggleTheme } from "$lib/stores/theme";
 
   let { children } = $props();
   let mobileNavOpen = $state(false);
+  let switchingCompany = $state(false);
+  let showOnboarding = $state(false);
+  // El chat (y marked) no forma parte del camino login → TPV.
+  let AiDrawer = $state<Component | null>(null);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const titles: Record<string, { title: string; subtitle: string }> = {
     "/": {
@@ -54,7 +69,7 @@
   };
 
   function metaFor(path: string) {
-    return titles[path] ?? { title: "Nix-C", subtitle: "" };
+    return titles[path] ?? { title: PRODUCT_DISPLAY_NAME, subtitle: "" };
   }
 
   const canEnter = $derived(
@@ -68,6 +83,7 @@
   });
 
   onMount(async () => {
+    initTheme();
     const token = $session.token;
     if (!token) {
       clearSession();
@@ -75,9 +91,25 @@
       return;
     }
     try {
+      configureRemoteOperator($session.remote);
       const me = await api.sessionMe();
       if (me) {
-        setSession(me, token);
+        let companies = $session.companies;
+        let activeCompanyId = $session.activeCompanyId;
+        try {
+          companies = await api.listCompanies();
+          const active = await api.getActiveCompany();
+          activeCompanyId = active?.id ?? companies[0]?.id ?? null;
+        } catch {
+          /* company API optional on older backends */
+        }
+        setSession(me, token, { companies, activeCompanyId, remote: $session.remote });
+        try {
+          const settings = await api.getSettings();
+          setIdleTimeoutMinutes(settings.idle_timeout_minutes);
+        } catch {
+          // Older backends keep the safe 15-minute default.
+        }
       } else {
         clearSession();
       }
@@ -88,13 +120,90 @@
     }
   });
 
-  async function lock() {
+  function clearIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+
+  function lockAfterIdle() {
+    clearIdleTimer();
+    void api.logout().catch(() => {
+      /* local lock still wins if the backend is unavailable */
+    });
+    clearSession();
+    showToast("Sesión bloqueada por inactividad. Vuelve a iniciar sesión.", "info");
+  }
+
+  function noteActivity() {
+    clearIdleTimer();
+    if (!canEnter) return;
+    const timeout = idleTimeoutMs($idleTimeoutMinutes);
+    if (timeout !== null) idleTimer = setTimeout(lockAfterIdle, timeout);
+  }
+
+  onMount(() => {
+    const events = ["pointerdown", "keydown", "touchstart", "scroll"] as const;
+    events.forEach((event) => window.addEventListener(event, noteActivity, { passive: true }));
+    noteActivity();
+    return () => {
+      clearIdleTimer();
+      events.forEach((event) => window.removeEventListener(event, noteActivity));
+    };
+  });
+
+  $effect(() => {
+    void canEnter;
+    void $idleTimeoutMinutes;
+    noteActivity();
+  });
+
+  // First-run wizard when session becomes valid (issue #11)
+  $effect(() => {
+    if (canEnter && !$mustChangePassword) {
+      try {
+        showOnboarding = !isOnboardingDone();
+      } catch {
+        showOnboarding = false;
+      }
+    } else {
+      showOnboarding = false;
+    }
+  });
+
+  /** Cerrar sesión: API logout best-effort + limpia store (issue #9). */
+  async function closeSession() {
     try {
       await api.logout();
     } catch {
-      /* ignore */
+      /* ignore network/session errors — still clear local state */
     }
     clearSession();
+    showToast("Sesión cerrada");
+  }
+
+  async function openAssistant() {
+    if (!AiDrawer) {
+      const module = await import("$lib/components/AiDrawer.svelte");
+      AiDrawer = module.default;
+    }
+    openAiChat();
+  }
+
+  async function onCompanyChange(e: Event) {
+    const id = Number((e.target as HTMLSelectElement).value);
+    if (!id || switchingCompany) return;
+    switchingCompany = true;
+    try {
+      const c = await api.setActiveCompany(id);
+      setActiveCompanyLocal(c);
+      showToast(`Empresa activa: ${c.trade_name}`);
+      // Reload current route data
+      if (typeof window !== "undefined") window.location.reload();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "No se pudo cambiar de empresa", "err");
+    } finally {
+      switchingCompany = false;
+    }
   }
 </script>
 
@@ -118,7 +227,7 @@
   <div class="flex h-dvh max-h-dvh overflow-hidden">
     <!-- Desktop sidebar -->
     <div class="hidden h-full shrink-0 md:flex">
-      <Sidebar />
+      <Sidebar onLogout={closeSession} />
     </div>
 
     <!-- Mobile drawer -->
@@ -130,7 +239,11 @@
           onclick={() => (mobileNavOpen = false)}
         ></button>
         <div class="absolute inset-y-0 left-0 z-10 flex h-full w-[min(18rem,88vw)] shadow-2xl">
-          <Sidebar forceExpanded onNavigate={() => (mobileNavOpen = false)} />
+          <Sidebar
+            forceExpanded
+            onNavigate={() => (mobileNavOpen = false)}
+            onLogout={closeSession}
+          />
         </div>
       </div>
     {/if}
@@ -160,19 +273,58 @@
           </div>
         </div>
         <div class="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          {#if $session.companies.length > 1}
+            <label class="hidden min-w-0 flex-col text-[10px] text-[var(--color-muted-dim)] sm:flex">
+              Empresa
+              <select
+                class="field mt-0.5 max-w-[10rem] py-1 text-xs"
+                value={String($session.activeCompanyId ?? "")}
+                disabled={switchingCompany}
+                onchange={onCompanyChange}
+                data-company-switcher
+              >
+                {#each $session.companies as c}
+                  <option value={String(c.id)}>{c.code} · {c.trade_name}</option>
+                {/each}
+              </select>
+            </label>
+          {:else if $activeCompany}
+            <span
+              class="hidden rounded-full border border-purple-400/30 bg-purple-500/10 px-2.5 py-1 text-[11px] font-medium text-[var(--color-purple-bright)] sm:inline"
+              title={$activeCompany.legal_name}
+            >
+              {$activeCompany.code}
+            </span>
+          {/if}
           <div class="mr-0 hidden text-right lg:block">
             <p class="text-sm font-medium text-[var(--color-text)]">
               {$session.user?.display_name}
             </p>
             <p class="text-[11px] capitalize text-radiant">{$session.user?.role}</p>
           </div>
-          <Button variant="secondary" class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm" onclick={lock}>
-            🔒<span class="hidden sm:inline"> Bloquear</span>
+          <Button
+            variant="ghost"
+            class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"
+            onclick={toggleTheme}
+            aria-label={$theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+            title={$theme === "dark" ? "Modo claro" : "Modo oscuro"}
+          >
+            {$theme === "dark" ? "☀" : "◐"}
+          </Button>
+          <Button
+            variant="secondary"
+            class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"
+            onclick={closeSession}
+            data-logout
+            aria-label="Cerrar sesión"
+          >
+            <span class="sm:hidden" aria-hidden="true">⎋</span>
+            <span class="hidden sm:inline">Cerrar sesión</span>
           </Button>
           <Button
             variant="ai"
             class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"
-            onclick={() => openAiChat()}
+            onclick={openAssistant}
           >
             <span class="h-1.5 w-1.5 rounded-full bg-white pulse-glow"></span>
             <span class="hidden sm:inline">Asistente </span>IA
@@ -186,6 +338,11 @@
     </div>
   </div>
 
-  <AiDrawer />
+  {#if AiDrawer}
+    <AiDrawer />
+  {/if}
   <Toast />
+  {#if showOnboarding && !$mustChangePassword}
+    <OnboardingWizard onComplete={() => (showOnboarding = false)} />
+  {/if}
 {/if}

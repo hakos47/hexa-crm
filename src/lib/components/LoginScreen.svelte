@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api/client";
   import { setSession } from "$lib/stores/session";
+  import { PRODUCT_DISPLAY_NAME, PRODUCT_TAGLINE } from "$lib/product";
   import Button from "./Button.svelte";
   import Logo from "./Logo.svelte";
 
@@ -8,7 +9,10 @@
   let password = $state("");
   let error = $state("");
   let loading = $state(false);
-  let shopName = $state("Nix-C");
+  let shopName = $state<string>(PRODUCT_DISPLAY_NAME);
+  let centralMode = $state(false);
+  let centralEndpoint = $state("");
+  let centralTenant = $state("MEIGA");
 
   let userInputEl: HTMLInputElement | undefined = $state();
 
@@ -16,7 +20,7 @@
     api
       .publicMeta()
       .then((s) => {
-        shopName = s.shop_name || "Nix-C";
+        shopName = s.shop_name || PRODUCT_DISPLAY_NAME;
       })
       .catch(() => {});
   });
@@ -35,8 +39,21 @@
     }
     loading = true;
     try {
-      const res = await api.login(username.trim(), password.trim());
-      setSession(res.user, res.token);
+      const remote = centralMode
+        ? { endpoint: centralEndpoint.trim(), tenantCode: centralTenant.trim().toUpperCase() }
+        : null;
+      if (remote && (!remote.endpoint || !remote.tenantCode)) {
+        error = "Indica la URL y el tenant del CRM central";
+        return;
+      }
+      const res = remote
+        ? await api.loginRemote(remote, username.trim(), password.trim())
+        : await api.login(username.trim(), password.trim());
+      setSession(res.user, res.token, {
+        companies: res.companies ?? [],
+        activeCompanyId: res.active_company_id ?? null,
+        remote,
+      });
     } catch (err) {
       error = err instanceof Error ? err.message : "No se pudo iniciar sesión";
       password = "";
@@ -64,7 +81,10 @@
       <h1 class="text-xl font-semibold tracking-tight text-[var(--color-text)] sm:text-2xl">
         {shopName}
       </h1>
-      <p class="mt-1 text-sm text-[var(--color-muted)]">Acceso restringido · Usuario y contraseña</p>
+      <p class="mt-1 text-sm text-[var(--color-muted)]">{PRODUCT_TAGLINE}</p>
+      <p class="mt-0.5 text-xs text-[var(--color-muted-dim)]">
+        Datos locales · Sin nube obligatoria · {PRODUCT_DISPLAY_NAME}
+      </p>
     </div>
 
     <form class="grid gap-4" onsubmit={submit}>
@@ -79,6 +99,22 @@
           required
         />
       </label>
+
+      <label class="flex items-center gap-2 text-xs text-[var(--color-muted)]">
+        <input type="checkbox" bind:checked={centralMode} />
+        Conectar como operador a CRM central
+      </label>
+
+      {#if centralMode}
+        <label class="grid gap-1.5 text-sm">
+          <span class="font-medium text-[var(--color-muted)]">URL CRM central</span>
+          <input bind:value={centralEndpoint} class="field w-full" placeholder="https://crm.mi-red.local" required />
+        </label>
+        <label class="grid gap-1.5 text-sm">
+          <span class="font-medium text-[var(--color-muted)]">Tenant</span>
+          <input bind:value={centralTenant} class="field w-full" placeholder="MEIGA" required />
+        </label>
+      {/if}
 
       <label class="grid gap-1.5 text-sm">
         <span class="font-medium text-[var(--color-muted)]">Contraseña / PIN</span>
@@ -106,8 +142,7 @@
     </form>
 
     <p class="mt-6 text-center text-[11px] leading-relaxed text-[var(--color-muted-dim)]">
-      Solo personal autorizado. Si es tu primer acceso con contraseña temporal, se te pedirá
-      cambiarla de inmediato.
+      Solo personal autorizado. El modo central no escribe datos en SQLite ni reutiliza las claves de servicio de Meiga.
     </p>
   </div>
 </div>

@@ -1,7 +1,7 @@
+use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 pub type Db = Arc<Mutex<Connection>>;
 
@@ -65,7 +65,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             vat_cents INTEGER NOT NULL,
             total_cents INTEGER NOT NULL,
             notes TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'completed'
+            status TEXT NOT NULL DEFAULT 'completed',
+            refunded_cents INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS sale_lines (
@@ -77,7 +78,8 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             vat_rate INTEGER NOT NULL,
             line_base_cents INTEGER NOT NULL,
             line_vat_cents INTEGER NOT NULL,
-            line_total_cents INTEGER NOT NULL
+            line_total_cents INTEGER NOT NULL,
+            returned_qty INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS cash_movements (
@@ -121,7 +123,18 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
         [],
     );
-    let _ = conn.execute("ALTER TABLE users ADD COLUMN temp_password_issued_at TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE sales ADD COLUMN refunded_cents INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE sale_lines ADD COLUMN returned_qty INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE users ADD COLUMN temp_password_issued_at TEXT",
+        [],
+    );
     let _ = conn.execute(
         "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''",
         [],
@@ -224,6 +237,8 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
         ("ollama_model", "qwen3.5:4b"),
         ("ollama_url", "http://127.0.0.1:11434"),
         ("default_vat", "21"),
+        ("idle_timeout_minutes", "15"),
+        ("last_backup_at", ""),
     ];
     for (k, v) in defaults {
         conn.execute(

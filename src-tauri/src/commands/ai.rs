@@ -49,18 +49,50 @@ pub fn ai_chat(
     let settings = settings_from_conn(&conn);
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
     let month = chrono::Local::now().format("%Y-%m").to_string();
 
+    // Only completed sales count toward business totals (cancelled tickets excluded).
     let sales_today: i64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(total_cents),0) FROM sales WHERE substr(sold_at,1,10)=?1",
+            "SELECT COALESCE(SUM(total_cents),0) FROM sales WHERE substr(sold_at,1,10)=?1 AND status='completed'",
             rusqlite::params![today],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let tickets_today: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sales WHERE substr(sold_at,1,10)=?1 AND status='completed'",
+            rusqlite::params![today],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let sales_yesterday: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(total_cents),0) FROM sales WHERE substr(sold_at,1,10)=?1 AND status='completed'",
+            rusqlite::params![yesterday],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let tickets_yesterday: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sales WHERE substr(sold_at,1,10)=?1 AND status='completed'",
+            rusqlite::params![yesterday],
             |r| r.get(0),
         )
         .unwrap_or(0);
     let sales_month: i64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(total_cents),0) FROM sales WHERE substr(sold_at,1,7)=?1",
+            "SELECT COALESCE(SUM(total_cents),0) FROM sales WHERE substr(sold_at,1,7)=?1 AND status='completed'",
+            rusqlite::params![month],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let tickets_month: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sales WHERE substr(sold_at,1,7)=?1 AND status='completed'",
             rusqlite::params![month],
             |r| r.get(0),
         )
@@ -74,7 +106,7 @@ pub fn ai_chat(
         .unwrap_or(0);
     let vat_month: i64 = conn
         .query_row(
-            "SELECT COALESCE(SUM(vat_cents),0) FROM sales WHERE substr(sold_at,1,7)=?1",
+            "SELECT COALESCE(SUM(vat_cents),0) FROM sales WHERE substr(sold_at,1,7)=?1 AND status='completed'",
             rusqlite::params![month],
             |r| r.get(0),
         )
@@ -113,8 +145,13 @@ pub fn ai_chat(
 
     let context = json!({
         "tienda": settings.shop_name,
+        "fecha_hoy": today,
         "ventas_hoy_eur": format!("{:.2}", sales_today as f64 / 100.0),
+        "tickets_hoy": tickets_today,
+        "ventas_ayer_eur": format!("{:.2}", sales_yesterday as f64 / 100.0),
+        "tickets_ayer": tickets_yesterday,
         "ventas_mes_eur": format!("{:.2}", sales_month as f64 / 100.0),
+        "tickets_mes": tickets_month,
         "caja_eur": format!("{:.2}", cash as f64 / 100.0),
         "iva_mes_eur": format!("{:.2}", vat_month as f64 / 100.0),
         "productos_muestra": products,
@@ -127,8 +164,7 @@ pub fn ai_chat(
         "Eres el asistente de la tienda \"{}\" en España. Responde en español, breve y práctico. \
 Precios en EUR con IVA incluido. Contexto actual (JSON compacto): {}. \
 No inventes datos fuera del contexto. Si falta info, dilo.",
-        settings.shop_name,
-        context
+        settings.shop_name, context
     );
 
     let mut payload_msgs = vec![json!({"role": "system", "content": system})];
@@ -142,24 +178,29 @@ No inventes datos fuera del contexto. Si falta info, dilo.",
         .build()
         .map_err(|e| e.to_string())?;
 
+    // think:false — qwen3.5 and other reasoning models otherwise fill
+    // message.thinking and leave message.content empty under low num_predict.
     match client
         .post(&url)
         .json(&json!({
             "model": settings.ollama_model,
             "stream": false,
+            "think": false,
             "messages": payload_msgs,
-            "options": { "temperature": 0.4, "num_predict": 400 }
+            "options": { "temperature": 0.4, "num_predict": 512 }
         }))
         .send()
     {
         Ok(res) if res.status().is_success() => {
             let data: Value = res.json().map_err(|e| e.to_string())?;
-            let reply = data
-                .pointer("/message/content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("Sin respuesta del modelo.")
-                .trim()
-                .to_string();
+            if let Some(err) = data.get("error").and_then(|e| e.as_str()) {
+                return Ok(AiChatResult {
+                    reply: format!("Error de Ollama: {err}"),
+                    model: settings.ollama_model,
+                    offline: Some(true),
+                });
+            }
+            let reply = extract_ollama_reply(&data);
             let model = data
                 .get("model")
                 .and_then(|m| m.as_str())
@@ -171,10 +212,52 @@ No inventes datos fuera del contexto. Si falta info, dilo.",
                 offline: Some(false),
             })
         }
-        _ => Ok(AiChatResult {
+        Ok(res) => {
+            let status = res.status();
+            let body = res.text().unwrap_or_default();
+            let snippet: String = body.chars().take(200).collect();
+            Ok(AiChatResult {
+                reply: format!(
+                    "Error de Ollama (HTTP {status}){}. Comprueba el modelo en Ajustes.",
+                    if snippet.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {snippet}")
+                    }
+                ),
+                model: settings.ollama_model,
+                offline: Some(true),
+            })
+        }
+        Err(_) => Ok(AiChatResult {
             reply: "No puedo conectar con Ollama. Comprueba que `ollama serve` está activo y el modelo está instalado. La app sigue funcionando sin IA.".into(),
             model: settings.ollama_model,
             offline: Some(true),
         }),
     }
+}
+
+fn extract_ollama_reply(data: &Value) -> String {
+    let content = data
+        .pointer("/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim();
+    if !content.is_empty() {
+        return content.to_string();
+    }
+    let thinking = data
+        .pointer("/message/thinking")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim();
+    if !thinking.is_empty() {
+        if let Some(last) = thinking.lines().map(str::trim).rfind(|l| !l.is_empty()) {
+            if last.len() < 500 && !last.to_lowercase().starts_with("thinking") {
+                return last.to_string();
+            }
+        }
+        return "El modelo solo generó razonamiento interno sin respuesta final. Prueba de nuevo o cambia de modelo en Ajustes.".into();
+    }
+    "Sin respuesta del modelo.".into()
 }

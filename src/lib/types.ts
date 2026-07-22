@@ -1,7 +1,31 @@
 import type { VatRate } from "./vat";
 
+/** app roles */
+export type UserRole = "admin" | "cajero";
+
+/** Multi-empresa: kind de negocio (docs/MULTI_COMPANY_ANALYSIS.md) */
+export type CompanyKind = "retail_secondhand" | "software_studio" | "generic";
+
+export type Company = {
+  id: number;
+  code: string;
+  legal_name: string;
+  trade_name: string;
+  nif: string;
+  kind: CompanyKind;
+  active: boolean;
+  created_at: string;
+};
+
+export type CompanyMember = {
+  company_id: number;
+  user_id: number;
+  role: UserRole;
+};
+
 export type Product = {
   id: number;
+  company_id?: number;
   sku: string;
   name: string;
   description: string;
@@ -32,6 +56,7 @@ export type ProductInput = {
 
 export type Customer = {
   id: number;
+  company_id?: number;
   name: string;
   email: string;
   phone: string;
@@ -62,6 +87,8 @@ export type SaleLine = {
   product_id: number;
   product_name?: string;
   qty: number;
+  /** Units already returned (partial returns, ciclo 8). */
+  returned_qty?: number;
   unit_price_cents: number;
   vat_rate: VatRate;
   line_base_cents: number;
@@ -71,6 +98,7 @@ export type SaleLine = {
 
 export type Sale = {
   id: number;
+  company_id?: number;
   customer_id: number | null;
   customer_name?: string | null;
   number: string;
@@ -78,15 +106,24 @@ export type Sale = {
   subtotal_cents: number;
   vat_cents: number;
   total_cents: number;
+  /** Cumulative refund cents from partial/full returns. */
+  refunded_cents?: number;
   notes: string;
+  /** completed | partially_returned | cancelled */
   status: string;
   lines?: SaleLine[];
+};
+
+export type ReturnLineInput = {
+  line_id: number;
+  qty: number;
 };
 
 export type CashKind = "income" | "expense" | "adjustment";
 
 export type CashMovement = {
   id: number;
+  company_id?: number;
   kind: CashKind;
   amount_cents: number;
   category: string;
@@ -135,6 +172,10 @@ export type Settings = {
   ollama_model: string;
   ollama_url: string;
   default_vat: VatRate;
+  /** Minutes without interaction before locking; 0 disables auto-lock. */
+  idle_timeout_minutes: number;
+  /** ISO timestamp of the latest locally initiated backup. */
+  last_backup_at: string | null;
 };
 
 export type AiMessage = {
@@ -147,9 +188,6 @@ export type AiChatResult = {
   model: string;
   offline?: boolean;
 };
-
-/** app roles */
-export type UserRole = "admin" | "cajero";
 
 export type AuthUser = {
   id: number;
@@ -181,4 +219,7 @@ export type CreateUserResult = {
 export type LoginResult = {
   user: AuthUser;
   token: string;
+  /** Empresas a las que el usuario tiene acceso (ciclo 7+) */
+  companies?: Company[];
+  active_company_id?: number | null;
 };

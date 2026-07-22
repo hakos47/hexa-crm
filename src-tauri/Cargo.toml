@@ -1,12 +1,12 @@
 [package]
-name = "nix-c"
-version = "0.1.0"
+name = "hexa-crm"
+version = "0.2.0"
 description = "CRM de tienda local con IVA ES e IA Ollama"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "nix_c_lib"
+name = "hexa_crm_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

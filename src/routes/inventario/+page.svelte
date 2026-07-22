@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/stores";
   import { api } from "$lib/api/client";
   import type { Product, ProductInput } from "$lib/types";
   import { formatEUR, parseEurosInput } from "$lib/money";
@@ -12,17 +13,32 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Select from "$lib/components/Select.svelte";
   import { showToast } from "$lib/stores/ui";
+  import {
+    parseProductCsv,
+    productCsvTemplate,
+    productsToCsv,
+  } from "$lib/import/product-csv";
+  import { downloadCsv, reorderSuggestionsToCsv } from "$lib/export/csv";
+  import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
+  import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
+  import { planReorderSuggestions } from "$lib/inventory/reorder";
 
   let products = $state<Product[]>([]);
+  /** product_id → units sold (net) last 14 days */
+  let sold14d = $state<Record<number, number>>({});
   let query = $state("");
   let categoryFilter = $state("");
   let loading = $state(true);
+  let importing = $state(false);
   let modalOpen = $state(false);
   let stockModal = $state(false);
   let editing = $state<Product | null>(null);
   let stockTarget = $state<Product | null>(null);
   let stockDelta = $state("1");
   let stockReason = $state("Reposición");
+  let fileInput: HTMLInputElement | undefined = $state();
+  let showReorder = $state(false);
+  let reorderQty = $state<Record<number, number>>({});
 
   let form = $state({
     sku: "",
@@ -55,10 +71,59 @@
     })
   );
 
+  const HORIZON_DAYS = 14;
+  const reorderSuggestions = $derived(planReorderSuggestions(products, sold14d, HORIZON_DAYS));
+
+  async function loadSoldMap() {
+    try {
+      const sales = await api.listSales();
+      const cutoff = Date.now() - HORIZON_DAYS * 86400000;
+      const recent = sales
+        .filter(
+          (s) =>
+            countsInBusinessTotals(s.status) && new Date(s.sold_at).getTime() >= cutoff,
+        )
+        .slice(0, 80);
+      const lines: { product_id: number; qty: number; returned_qty?: number }[] = [];
+      for (const s of recent) {
+        try {
+          const detail = await api.getSale(s.id);
+          if (detail.lines) {
+            for (const l of detail.lines) {
+              lines.push({
+                product_id: l.product_id,
+                qty: l.qty,
+                returned_qty: l.returned_qty,
+              });
+            }
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      const map: Record<number, number> = {};
+      for (const p of products) {
+        map[p.id] = qtySoldForProduct(lines, p.id);
+      }
+      sold14d = map;
+    } catch {
+      sold14d = {};
+    }
+  }
+
+  function coverFor(p: Product) {
+    return estimateDaysOfCover({
+      stock: p.stock,
+      qtySoldInHorizon: sold14d[p.id] ?? 0,
+      horizonDays: HORIZON_DAYS,
+    });
+  }
+
   async function load() {
     loading = true;
     try {
       products = await api.listProducts(false);
+      await loadSoldMap();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
     } finally {
@@ -66,7 +131,28 @@
     }
   }
 
-  onMount(load);
+  onMount(async () => {
+    await load();
+    if ($page.url.searchParams.get("nuevo") === "1") {
+      openCreate();
+    }
+    showReorder = $page.url.searchParams.get("reponer") === "1";
+  });
+
+  function reorderQuantity(suggestion: (typeof reorderSuggestions)[number]) {
+    return reorderQty[suggestion.product_id] ?? suggestion.qty_suggested;
+  }
+
+  function exportReorder() {
+    const rows = reorderSuggestions
+      .map((suggestion) => ({ ...suggestion, qty_suggested: Math.max(0, Math.trunc(reorderQuantity(suggestion))) }))
+      .filter((suggestion) => suggestion.qty_suggested > 0);
+    if (!rows.length) {
+      showToast("No hay líneas de reposición para exportar", "info");
+      return;
+    }
+    downloadCsv(`pedido-proveedor-${new Date().toISOString().slice(0, 10)}.csv`, reorderSuggestionsToCsv(rows));
+  }
 
   function openCreate() {
     editing = null;
@@ -153,7 +239,70 @@
       showToast(e instanceof Error ? e.message : "Error", "err");
     }
   }
+
+  function downloadTemplate() {
+    downloadCsv("plantilla-productos.csv", productCsvTemplate());
+  }
+
+  function exportCatalog() {
+    downloadCsv(
+      `productos-${new Date().toISOString().slice(0, 10)}.csv`,
+      productsToCsv(products),
+    );
+  }
+
+  function triggerImport() {
+    fileInput?.click();
+  }
+
+  async function onImportFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    importing = true;
+    try {
+      const text = await file.text();
+      const parsed = parseProductCsv(text, products);
+      if (parsed.errors.length && !parsed.rows.length) {
+        showToast(parsed.errors[0]?.message || "CSV no válido", "err");
+        return;
+      }
+      if (parsed.errors.length) {
+        showToast(
+          `${parsed.errors.length} fila(s) con error. Primera: ${parsed.errors[0].message}`,
+          "err",
+        );
+        return;
+      }
+      if (!parsed.rows.length) {
+        showToast("No hay filas de producto en el CSV", "err");
+        return;
+      }
+      let ok = 0;
+      for (const row of parsed.rows) {
+        await api.upsertProduct(row);
+        ok += 1;
+      }
+      showToast(
+        `Importación OK: ${ok} producto(s) (${parsed.would_create} nuevos, ${parsed.would_update} actualizados)`,
+      );
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al importar", "err");
+    } finally {
+      importing = false;
+    }
+  }
 </script>
+
+<input
+  bind:this={fileInput}
+  type="file"
+  accept=".csv,text/csv"
+  class="hidden"
+  onchange={onImportFile}
+/>
 
 <div class="mb-4 flex flex-wrap items-center gap-3">
   <input
@@ -170,8 +319,57 @@
       ...categories.map((c) => ({ value: c, label: c })),
     ]}
   />
-  <Button class="ml-auto" onclick={openCreate}>+ Nuevo producto</Button>
+  <div class="ml-auto flex flex-wrap gap-2">
+    <Button variant="secondary" onclick={downloadTemplate} disabled={importing}>
+      Plantilla CSV
+    </Button>
+    <Button variant="secondary" onclick={exportCatalog} disabled={importing || !products.length}>
+      Exportar CSV
+    </Button>
+    <Button variant="secondary" onclick={triggerImport} disabled={importing}>
+      {importing ? "Importando…" : "Importar CSV"}
+    </Button>
+    <Button variant={showReorder ? "primary" : "secondary"} onclick={() => (showReorder = !showReorder)}>
+      Reponer {reorderSuggestions.length ? `(${reorderSuggestions.length})` : ""}
+    </Button>
+    <Button onclick={openCreate}>+ Nuevo producto</Button>
+  </div>
 </div>
+
+{#if showReorder && !loading}
+  <Card class="mb-4 border border-amber-400/25 bg-amber-500/[0.06]" lift={false} data-reorder-panel>
+    <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="section-label mb-1 !text-amber-200">Reposición sugerida</p>
+        <h2 class="text-base font-semibold text-[var(--color-text)]">Pedido local para proveedor</h2>
+        <p class="mt-1 text-xs text-[var(--color-muted)]">Calculado con stock mínimo y ventas netas de los últimos {HORIZON_DAYS} días. Edita cantidades antes de exportar.</p>
+      </div>
+      <Button variant="secondary" onclick={exportReorder} disabled={!reorderSuggestions.length}>Exportar pedido CSV</Button>
+    </div>
+    {#if !reorderSuggestions.length}
+      <p class="text-sm text-[var(--color-muted)]">No hay productos que requieran reposición ahora.</p>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[38rem] text-left text-sm">
+          <thead class="border-b border-[var(--color-border-soft)] text-xs uppercase text-[var(--color-muted-dim)]">
+            <tr><th class="py-2 pr-3">Producto</th><th class="py-2 pr-3">Stock</th><th class="py-2 pr-3">Cobertura</th><th class="py-2 pr-3">Prioridad</th><th class="py-2 text-right">Pedir</th></tr>
+          </thead>
+          <tbody>
+            {#each reorderSuggestions as suggestion (suggestion.product_id)}
+              <tr class="border-b border-[var(--color-border-soft)] last:border-0">
+                <td class="py-2.5 pr-3"><p class="font-medium text-[var(--color-text)]">{suggestion.name}</p><p class="text-xs text-[var(--color-muted-dim)]">{suggestion.sku}</p></td>
+                <td class="py-2.5 pr-3 tabular">{suggestion.stock} <span class="text-xs text-[var(--color-muted-dim)]">/ mín {suggestion.min_stock}</span></td>
+                <td class="py-2.5 pr-3 tabular">{suggestion.days_of_cover === null ? "sin ventas" : `~${suggestion.days_of_cover} d`}</td>
+                <td class="py-2.5 pr-3"><Badge tone={suggestion.priority === "critical" ? "danger" : "warn"}>{suggestion.priority === "critical" ? "crítico" : "vigilar"}</Badge></td>
+                <td class="py-2.5 text-right"><input class="field w-20 py-1 text-right tabular" type="number" min="0" value={reorderQuantity(suggestion)} oninput={(event) => { reorderQty = { ...reorderQty, [suggestion.product_id]: Number((event.currentTarget as HTMLInputElement).value) || 0 }; }} /></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </Card>
+{/if}
 
 {#if loading}
   <div class="skeleton h-64"></div>
@@ -183,11 +381,12 @@
   <Card lift={false} class="overflow-hidden p-0">
     <div class="w-full max-w-full overflow-x-auto">
       <table class="w-full min-w-[36rem] text-left text-sm">
-        <thead class="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+        <thead class="border-b border-[var(--color-border-soft)] text-xs uppercase tracking-wide text-[var(--color-muted-dim)]">
           <tr>
             <th class="px-4 py-3 font-medium">Producto</th>
             <th class="px-4 py-3 font-medium">Categoría</th>
             <th class="px-4 py-3 font-medium">Stock</th>
+            <th class="px-4 py-3 font-medium">Cobertura</th>
             <th class="px-4 py-3 font-medium">PVP</th>
             <th class="px-4 py-3 font-medium">IVA</th>
             <th class="px-4 py-3 font-medium">Coste</th>
@@ -196,17 +395,18 @@
         </thead>
         <tbody>
           {#each filtered as p}
-            <tr class="border-b border-white/5 transition hover:bg-white/[0.03]">
+            {@const cover = coverFor(p)}
+            <tr class="border-b border-[var(--color-border-soft)] transition hover:bg-[var(--color-purple-mist)]">
               <td class="px-4 py-3">
-                <p class="font-medium text-slate-100">{p.name}</p>
-                <p class="text-xs text-slate-500">{p.sku}</p>
+                <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+                <p class="text-xs text-[var(--color-muted-dim)]">{p.sku}</p>
               </td>
               <td class="px-4 py-3 text-sm text-[var(--color-muted)]">
                 {p.category || "—"}
               </td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
-                  <span class="tabular {p.stock <= p.min_stock ? 'text-rose-300' : 'text-slate-200'}">
+                  <span class="tabular {p.stock <= p.min_stock ? 'text-rose-300' : 'text-[var(--color-text)]'}">
                     {p.stock}
                   </span>
                   {#if p.stock <= p.min_stock}
@@ -214,11 +414,23 @@
                   {/if}
                 </div>
               </td>
+              <td class="px-4 py-3 text-xs">
+                <span
+                  class="tabular {cover.label === 'critical'
+                    ? 'text-rose-300'
+                    : cover.label === 'watch'
+                      ? 'text-amber-200'
+                      : 'text-[var(--color-muted-dim)]'}"
+                  title="Estimación a ritmo de ventas de los últimos {HORIZON_DAYS} días"
+                >
+                  {cover.display}
+                </span>
+              </td>
               <td class="px-4 py-3 tabular">{formatEUR(p.price_cents)}</td>
               <td class="px-4 py-3">
                 <Badge tone="vat">{p.vat_rate}%</Badge>
               </td>
-              <td class="px-4 py-3 tabular text-slate-400">{formatEUR(p.cost_cents)}</td>
+              <td class="px-4 py-3 tabular text-[var(--color-muted)]">{formatEUR(p.cost_cents)}</td>
               <td class="px-4 py-3">
                 <div class="flex justify-end gap-1">
                   <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openStock(p)}>

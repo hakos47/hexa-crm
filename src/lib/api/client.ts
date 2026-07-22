@@ -5,6 +5,7 @@ import type {
   AuthUser,
   CashInput,
   CashMovement,
+  Company,
   CreateUserResult,
   Customer,
   CustomerInput,
@@ -21,6 +22,26 @@ import type {
 import { browserApi } from "./browser-store";
 import { getToken, clearSession } from "../stores/session";
 import { assertTokenForCommand, PUBLIC_COMMANDS } from "./guard";
+import { remoteOperatorApi, remoteOperatorLogin, type RemoteOperatorConfig } from "./remote-operator";
+
+let remoteOperatorConfig: RemoteOperatorConfig | null = null;
+
+export function configureRemoteOperator(config: RemoteOperatorConfig | null) {
+  remoteOperatorConfig = config ? { endpoint: config.endpoint, tenantCode: config.tenantCode } : null;
+}
+
+export function currentRemoteOperatorConfig() {
+  return remoteOperatorConfig;
+}
+
+function requireRemoteConfig() {
+  if (!remoteOperatorConfig) throw new Error("CRM central no configurado");
+  return remoteOperatorConfig;
+}
+
+function remoteWriteUnavailable(): never {
+  throw new Error("Esta escritura aún no está disponible en CRM central; no se ha guardado nada localmente.");
+}
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -55,89 +76,26 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   }
 
   try {
-    switch (cmd) {
-      case "public_meta":
-        return browserApi.public_meta() as T;
-      case "login":
-        return (await browserApi.login(
-          args?.username as string,
-          (args?.password as string) ?? (args?.pin as string)
-        )) as T;
-      case "logout":
-        browserApi.logout(token);
-        return undefined as T;
-      case "session_me":
-        return (await browserApi.session_me(token)) as T;
-      case "list_users":
-        return (await browserApi.list_users(token)) as T;
-      case "upsert_user":
-        return (await browserApi.upsert_user(args?.input as UserInput, token)) as T;
-      case "change_own_pin":
-        await browserApi.change_own_pin(
-          args?.current_pin as string,
-          args?.new_pin as string,
-          token
-        );
-        return undefined as T;
-      case "complete_forced_password_change":
-        return (await browserApi.complete_forced_password_change(
-          args?.current_password as string,
-          args?.new_password as string,
-          token
-        )) as T;
-      case "list_products":
-        return browserApi.list_products(
-          (args?.active_only as boolean | undefined) ?? true,
-          token
-        ) as T;
-      case "upsert_product":
-        return browserApi.upsert_product(args?.input as ProductInput, token) as T;
-      case "adjust_stock":
-        return browserApi.adjust_stock(
-          args?.product_id as number,
-          args?.delta as number,
-          args?.reason as string,
-          token
-        ) as T;
-      case "list_customers":
-        return browserApi.list_customers(token) as T;
-      case "upsert_customer":
-        return browserApi.upsert_customer(args?.input as CustomerInput, token) as T;
-      case "create_sale":
-        return browserApi.create_sale(
-          args?.lines as SaleLineInput[],
-          args?.customer_id as number | null | undefined,
-          args?.notes as string | undefined,
-          token
-        ) as T;
-      case "list_sales":
-        return browserApi.list_sales(token) as T;
-      case "get_sale":
-        return browserApi.get_sale(args?.id as number, token) as T;
-      case "list_cash_movements":
-        return browserApi.list_cash_movements(token) as T;
-      case "create_cash_movement":
-        return browserApi.create_cash_movement(args?.input as CashInput, token) as T;
-      case "get_cash_balance":
-        return browserApi.get_cash_balance(token) as T;
-      case "vat_summary":
-        return browserApi.vat_summary(args?.from as string, args?.to as string, token) as T;
-      case "dashboard_stats":
-        return browserApi.dashboard_stats(token) as T;
-      case "get_settings":
-        return browserApi.get_settings(token) as T;
-      case "update_settings":
-        return browserApi.update_settings(args?.partial as Partial<Settings>, token) as T;
-      case "ai_chat":
-        return (await browserApi.ai_chat(args?.messages as AiMessage[], token)) as T;
-      case "ollama_health":
-        return (await browserApi.ollama_health(token)) as T;
-      case "reset_demo":
-        await browserApi.reset_demo(token);
-        return undefined as T;
-      default:
-        throw new Error(`Comando no soportado en browser: ${cmd}`);
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
+
+    const response = await fetch("/api/rpc", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ cmd, args }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const errMsg = errData.error || `HTTP error! status: ${response.status}`;
+      throw new Error(errMsg);
+    }
+
+    return (await response.json()) as T;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("Sesión") || msg.includes("sesión")) {
@@ -151,8 +109,12 @@ export const api = {
   publicMeta: () => call<{ shop_name: string }>("public_meta"),
   login: (username: string, password: string) =>
     call<LoginResult>("login", { username, password, pin: password }),
-  logout: () => call<void>("logout"),
-  sessionMe: () => call<AuthUser | null>("session_me"),
+  loginRemote: (config: RemoteOperatorConfig, username: string, password: string) => {
+    configureRemoteOperator(config);
+    return remoteOperatorLogin(config, username, password);
+  },
+  logout: () => remoteOperatorConfig ? Promise.resolve() : call<void>("logout"),
+  sessionMe: () => remoteOperatorConfig ? remoteOperatorApi.me(requireRemoteConfig(), getToken() ?? "") : call<AuthUser | null>("session_me"),
   listUsers: () => call<AuthUser[]>("list_users"),
   upsertUser: (input: UserInput) => call<CreateUserResult>("upsert_user", { input }),
   changeOwnPin: (currentPin: string, newPin: string) =>
@@ -163,31 +125,50 @@ export const api = {
       new_password: newPassword,
     }),
 
-  listProducts: (activeOnly = true) =>
-    call<Product[]>("list_products", { active_only: activeOnly }),
-  upsertProduct: (input: ProductInput) => call<Product>("upsert_product", { input }),
-  adjustStock: (productId: number, delta: number, reason: string) =>
-    call<Product>("adjust_stock", { product_id: productId, delta, reason }),
-  listCustomers: () => call<Customer[]>("list_customers"),
-  upsertCustomer: (input: CustomerInput) => call<Customer>("upsert_customer", { input }),
+  listProducts: async (activeOnly = true) => remoteOperatorConfig ? (await remoteOperatorApi.products(requireRemoteConfig(), getToken() ?? "")).filter((product) => !activeOnly || product.active) : call<Product[]>("list_products", { active_only: activeOnly }),
+  upsertProduct: (input: ProductInput) => remoteOperatorConfig ? remoteOperatorApi.saveProduct(requireRemoteConfig(), getToken() ?? "", input) : call<Product>("upsert_product", { input }),
+  adjustStock: (productId: number, delta: number, reason: string) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Product>("adjust_stock", { product_id: productId, delta, reason }),
+  listCustomers: () => remoteOperatorConfig ? remoteOperatorApi.customers(requireRemoteConfig(), getToken() ?? "") : call<Customer[]>("list_customers"),
+  upsertCustomer: (input: CustomerInput) => remoteOperatorConfig ? remoteOperatorApi.saveCustomer(requireRemoteConfig(), getToken() ?? "", input) : call<Customer>("upsert_customer", { input }),
   createSale: (lines: SaleLineInput[], customerId?: number | null, notes?: string) =>
-    call<Sale>("create_sale", {
+    remoteOperatorConfig ? remoteOperatorApi.createSale(requireRemoteConfig(), getToken() ?? "", lines, customerId ?? null, notes ?? "") : call<Sale>("create_sale", {
       lines,
       customer_id: customerId ?? null,
       notes: notes ?? "",
     }),
-  listSales: () => call<Sale[]>("list_sales"),
-  getSale: (id: number) => call<Sale>("get_sale", { id }),
-  listCashMovements: () => call<CashMovement[]>("list_cash_movements"),
-  createCashMovement: (input: CashInput) => call<CashMovement>("create_cash_movement", { input }),
-  getCashBalance: () => call<number>("get_cash_balance"),
-  vatSummary: (from: string, to: string) => call<VatSummary>("vat_summary", { from, to }),
-  dashboardStats: () => call<DashboardStats>("dashboard_stats"),
+  listSales: () => remoteOperatorConfig ? remoteOperatorApi.sales(requireRemoteConfig(), getToken() ?? "") : call<Sale[]>("list_sales"),
+  getSale: (id: number) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("get_sale", { id }),
+  cancelSale: (id: number) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("cancel_sale", { id }),
+  returnSaleLines: (id: number, lines: { line_id: number; qty: number }[]) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("return_sale_lines", { id, lines }),
+  listCashMovements: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<CashMovement[]>("list_cash_movements"),
+  createCashMovement: (input: CashInput) => remoteOperatorConfig ? remoteWriteUnavailable() : call<CashMovement>("create_cash_movement", { input }),
+  getCashBalance: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<number>("get_cash_balance"),
+  vatSummary: (from: string, to: string) => remoteOperatorConfig ? remoteWriteUnavailable() : call<VatSummary>("vat_summary", { from, to }),
+  dashboardStats: () => remoteOperatorConfig ? remoteOperatorApi.dashboard(requireRemoteConfig(), getToken() ?? "") : call<DashboardStats>("dashboard_stats"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (partial: Partial<Settings>) =>
     call<Settings>("update_settings", { partial }),
   aiChat: (messages: AiMessage[]) => call<AiChatResult>("ai_chat", { messages }),
   ollamaHealth: () => call<{ ok: boolean; models: string[] }>("ollama_health"),
-  resetDemo: () => call<void>("reset_demo"),
+  resetDemo: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<void>("reset_demo"),
+  exportBackup: () => call<unknown>("export_backup"),
+  preMigrationBackup: (reason: string) =>
+    call<unknown>("pre_migration_backup", { reason }),
+  restoreBackup: (raw: unknown) => call<void>("restore_backup", { raw }),
+  listCompanies: () => call<Company[]>("list_companies"),
+  getActiveCompany: () => call<Company | null>("get_active_company"),
+  setActiveCompany: (companyId: number) =>
+    call<Company>("set_active_company", { company_id: companyId }),
+  billingByCompany: () =>
+    call<
+      {
+        company_id: number;
+        code: string;
+        trade_name: string;
+        sales_count: number;
+        total_cents: number;
+      }[]
+    >("billing_by_company"),
   isTauri,
 };

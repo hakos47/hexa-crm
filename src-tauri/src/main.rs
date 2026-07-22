@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    nix_c_lib::run()
+    hexa_crm_lib::run()
 }

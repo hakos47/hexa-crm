@@ -1,20 +1,66 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
-  import type { DashboardStats, Sale } from "$lib/types";
+  import type { DashboardStats, Sale, Settings } from "$lib/types";
   import { formatEUR } from "$lib/money";
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
-  import { showToast } from "$lib/stores/ui";
+  import { openAiChat, showToast } from "$lib/stores/ui";
+  import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
+  import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
+  import { isOnboardingDone } from "$lib/onboarding/state";
+  import { backupAgeDays, needsBackupReminder } from "$lib/backup/backup-status";
+  import { dashboardHealth } from "$lib/dashboard/health";
+  import { session } from "$lib/stores/session";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
+  let sold14d = $state<Record<number, number>>({});
   let loading = $state(true);
+  let onboardingPending = $state(false);
+  let settings = $state<Settings | null>(null);
+  let centralSynchronizedAt = $state<string | null>(null);
 
   onMount(async () => {
     try {
-      [stats, sales] = await Promise.all([api.dashboardStats(), api.listSales()]);
+      onboardingPending = !isOnboardingDone();
+      [stats, sales, settings] = await Promise.all([
+        api.dashboardStats(),
+        api.listSales(),
+        api.getSettings(),
+      ]);
+      centralSynchronizedAt = $session.remote ? new Date().toISOString() : null;
+      // Build sold map for low-stock cover hints (last 14d, cap fetches)
+      const cutoff = Date.now() - 14 * 86400000;
+      const recentSales = sales
+        .filter(
+          (s) =>
+            countsInBusinessTotals(s.status) && new Date(s.sold_at).getTime() >= cutoff,
+        )
+        .slice(0, 40);
+      const lines: { product_id: number; qty: number; returned_qty?: number }[] = [];
+      for (const s of recentSales) {
+        try {
+          const d = await api.getSale(s.id);
+          if (d.lines) {
+            for (const l of d.lines) {
+              lines.push({
+                product_id: l.product_id,
+                qty: l.qty,
+                returned_qty: l.returned_qty,
+              });
+            }
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      const map: Record<number, number> = {};
+      for (const p of stats?.low_stock ?? []) {
+        map[p.id] = qtySoldForProduct(lines, p.id);
+      }
+      sold14d = map;
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error al cargar", "err");
     } finally {
@@ -23,6 +69,11 @@
   });
 
   const recent = $derived(sales.slice(0, 6));
+  const showBackupReminder = $derived(needsBackupReminder(settings?.last_backup_at));
+  const backupDays = $derived(backupAgeDays(settings?.last_backup_at));
+  const health = $derived(dashboardHealth(sales, stats?.low_stock ?? [], showBackupReminder));
+  const trendMax = $derived(Math.max(...health.trend.map((day) => day.cents), 1));
+  const deltaLabel = (delta: number | null) => delta === null ? "Sin referencia" : `${delta > 0 ? "+" : ""}${delta}% vs ayer`;
 </script>
 
 {#if loading}
@@ -32,13 +83,47 @@
     {/each}
   </div>
 {:else if stats}
-  <!-- Overview KPIs — reference CRM style -->
-  <p class="section-label mb-3">Overview</p>
+  {#if $session.remote}
+    <p class="mb-4 rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100" data-central-status>
+      CRM central · tenant {$session.remote.tenantCode} · datos actualizados {centralSynchronizedAt ? new Date(centralSynchronizedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ahora"}. Sin conexión, las operaciones no se guardan localmente.
+    </p>
+  {/if}
+  {#if onboardingPending}
+    <Card class="mb-4 border border-purple-400/30 bg-purple-500/10" lift={false} data-onboarding-hint>
+      <p class="text-sm font-medium text-[var(--color-purple-bright)]">Puesta en marcha pendiente</p>
+      <p class="mt-1 text-xs text-[var(--color-muted)]">
+        Completa el asistente inicial o ve a Ajustes para nombrar la tienda. Luego cobra tu primera
+        venta en el TPV.
+      </p>
+      <a href="/ventas?nuevo=1" class="mt-2 inline-block text-sm text-radiant hover:underline">
+        Ir a cobrar →
+      </a>
+    </Card>
+  {/if}
+  {#if showBackupReminder}
+    <Card class="mb-4 border border-amber-400/30 bg-amber-500/10" lift={false} data-backup-reminder>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-amber-100">
+            {backupDays === null ? "Aún no hay una copia de seguridad" : `La última copia tiene ${backupDays} días`}
+          </p>
+          <p class="mt-1 text-xs text-amber-100/75">
+            Guarda un JSON local antes de continuar. No se envía nada a la nube.
+          </p>
+        </div>
+        <a href="/ajustes" class="text-sm font-medium text-amber-100 underline-offset-2 hover:underline">
+          Hacer copia →
+        </a>
+      </div>
+    </Card>
+  {/if}
+  <!-- Resumen KPIs -->
+  <p class="section-label mb-3">Resumen</p>
   <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <KpiCard
       label="Ventas hoy"
       value={formatEUR(stats.sales_today_cents)}
-      hint="{stats.sales_today_count} ticket(s)"
+      hint={`${stats.sales_today_count} ticket(s) · ${deltaLabel(health.sales_delta_percent)}`}
       icon="◎"
       accent="emerald"
     />
@@ -65,6 +150,49 @@
     />
   </div>
 
+  <div class="mt-4 grid gap-4 lg:grid-cols-3" data-dashboard-health>
+    <Card class="lg:col-span-2" lift={false}>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="section-label !normal-case !tracking-wide !text-sm">Pulso de hoy</h2>
+          <p class="mt-1 text-sm text-[var(--color-muted)]">Ticket medio {formatEUR(health.average_ticket_cents)} · {deltaLabel(health.tickets_delta_percent)} en tickets</p>
+        </div>
+        <span class="text-xs text-[var(--color-muted-dim)]">Últimos 7 días</span>
+      </div>
+      <div class="mt-5 flex h-24 items-end gap-2" aria-label="Tendencia de ventas de los últimos siete días">
+        {#each health.trend as day}
+          <div class="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <span class="text-[10px] tabular text-[var(--color-muted-dim)]">{day.cents ? formatEUR(day.cents) : "—"}</span>
+            <div class="w-full rounded-t bg-gradient-to-t from-purple-600 to-violet-300/90 transition-[height] duration-300" style={`height: ${Math.max(6, Math.round((day.cents / trendMax) * 64))}px`}></div>
+            <span class="text-[10px] text-[var(--color-muted-dim)]">{new Date(`${day.date}T12:00:00`).toLocaleDateString("es-ES", { weekday: "narrow" })}</span>
+          </div>
+        {/each}
+      </div>
+    </Card>
+    <Card lift={false}>
+      <div class="mb-3 flex items-center justify-between"><h2 class="section-label !normal-case !tracking-wide !text-sm">Atención ahora</h2><Badge tone={health.alerts.length ? "warn" : "ok"}>{health.alerts.length || "OK"}</Badge></div>
+      {#if health.alerts.length}
+        <ul class="space-y-2">
+          {#each health.alerts as alert (alert.id)}
+            <li><a href={alert.href} class="block rounded-lg border border-[var(--color-border)] bg-black/20 p-2.5 hover:border-purple-400/35"><p class="text-xs font-medium text-[var(--color-text)]">{alert.title}</p><p class="mt-0.5 text-[11px] text-[var(--color-muted-dim)]">{alert.detail} →</p></a></li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="text-sm text-emerald-300">Todo bajo control. Sigue así.</p>
+      {/if}
+    </Card>
+  </div>
+
+  <Card class="mt-4 border border-purple-400/20 bg-purple-500/5" lift={false} data-dashboard-ai-slot>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="section-label !normal-case !tracking-wide !text-sm">Recomendación IA</h2>
+        <p class="mt-1 text-sm text-[var(--color-muted)]">Pregunta por el resumen de hoy, stock o prioridades. Si Ollama está apagado, el resto del CRM sigue disponible.</p>
+      </div>
+      <button type="button" class="min-h-11 rounded-xl border border-purple-400/30 px-4 text-sm font-medium text-radiant hover:bg-purple-500/10" onclick={openAiChat}>Preguntar al asistente</button>
+    </div>
+  </Card>
+
   <div class="mt-8 grid gap-4 lg:grid-cols-3">
     <!-- Stock alerts as pipeline-like cards -->
     <Card class="lg:col-span-1" lift={false}>
@@ -79,9 +207,14 @@
       {:else}
         <ul class="space-y-2">
           {#each stats.low_stock as p}
+            {@const cover = estimateDaysOfCover({
+              stock: p.stock,
+              qtySoldInHorizon: sold14d[p.id] ?? 0,
+              horizonDays: 14,
+            })}
             <li>
               <a
-                href="/inventario"
+                href="/inventario?reponer=1"
                 class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-2.5 transition hover:border-purple-400/25 hover:bg-purple-500/10"
               >
                 <div class="min-w-0">
@@ -92,7 +225,9 @@
                 </div>
                 <div class="text-right">
                   <p class="tabular text-sm text-rose-300">{p.stock}</p>
-                  <p class="text-[10px] text-[var(--color-muted-dim)]">mín {p.min_stock}</p>
+                  <p class="text-[10px] text-[var(--color-muted-dim)]">
+                    mín {p.min_stock} · {cover.display}
+                  </p>
                 </div>
               </a>
             </li>
@@ -140,7 +275,7 @@
       <h2 class="section-label mb-4 !normal-case !tracking-wide !text-sm">Acciones rápidas</h2>
       <div class="grid gap-2">
         <a
-          href="/ventas"
+          href="/ventas?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">◎</span>
@@ -152,23 +287,23 @@
           </div>
         </a>
         <a
-          href="/inventario"
+          href="/inventario?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">▣</span>
           <div>
-            <p class="text-sm font-medium text-[var(--color-text)]">Inventario</p>
-            <p class="text-[11px] text-[var(--color-muted-dim)]">Stock y productos</p>
+            <p class="text-sm font-medium text-[var(--color-text)]">Nuevo producto</p>
+            <p class="text-[11px] text-[var(--color-muted-dim)]">Alta rápida de stock</p>
           </div>
         </a>
         <a
-          href="/caja"
+          href="/caja?nuevo=1"
           class="group flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-4 py-3 transition hover:border-purple-400/35 hover:bg-purple-500/10"
         >
           <span class="kpi-icon !h-9 !w-9">€</span>
           <div>
-            <p class="text-sm font-medium text-[var(--color-text)]">Caja</p>
-            <p class="text-[11px] text-[var(--color-muted-dim)]">Presupuesto actual</p>
+            <p class="text-sm font-medium text-[var(--color-text)]">Movimiento de caja</p>
+            <p class="text-[11px] text-[var(--color-muted-dim)]">Gasto o ingreso manual</p>
           </div>
         </a>
         <a
