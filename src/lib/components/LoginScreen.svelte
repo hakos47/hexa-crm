@@ -9,7 +9,7 @@
   let password = $state("");
   let error = $state("");
   let loading = $state(false);
-  let shopName = $state(PRODUCT_DISPLAY_NAME);
+  let shopName = $state<string>(PRODUCT_DISPLAY_NAME);
 
   let userInputEl: HTMLInputElement | undefined = $state();
 

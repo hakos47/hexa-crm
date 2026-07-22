@@ -10,6 +10,7 @@
     class: className = "",
     onclick,
     children,
+    ...restProps
   }: {
     variant?: Variant;
     type?: "button" | "submit" | "reset";
@@ -17,6 +18,7 @@
     class?: string;
     onclick?: (e: MouseEvent) => void;
     children: Snippet;
+    [attribute: string]: unknown;
   } = $props();
 
   const base =
@@ -33,6 +35,6 @@
   };
 </script>
 
-<button {type} {disabled} class="{base} {styles[variant]} {className}" {onclick}>
+<button {type} {disabled} class="{base} {styles[variant]} {className}" {onclick} {...restProps}>
   {@render children()}
 </button>
