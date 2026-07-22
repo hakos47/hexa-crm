@@ -93,7 +93,6 @@ export async function initDb() {
       applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
   `;
-
   await sql`
     CREATE TABLE IF NOT EXISTS companies (
       id SERIAL PRIMARY KEY,
@@ -103,6 +102,36 @@ export async function initDb() {
       nif TEXT NOT NULL DEFAULT '',
       kind TEXT NOT NULL DEFAULT 'generic',
       active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS service_request_replays (
+      key_id TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      PRIMARY KEY (key_id, signature)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      operation TEXT NOT NULL,
+      key TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      response JSONB NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (company_id, operation, key)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS service_audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      key_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      correlation_id TEXT,
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
   `;
@@ -243,7 +272,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0001_core') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0002_service_api') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {

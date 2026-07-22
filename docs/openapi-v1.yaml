@@ -24,6 +24,7 @@ paths:
   /reservations:
     post:
       summary: Reserva atómica de stock
+      security: [{ serviceHmac: [] }]
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       responses:
