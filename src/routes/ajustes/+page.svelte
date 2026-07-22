@@ -18,6 +18,7 @@
   } from "$lib/stores/session";
   import { normalizeIdleTimeoutMinutes } from "$lib/auth/idle-timeout";
   import { parseBackupJson, type BackupEnvelope } from "$lib/backup/backup";
+  import { theme, toggleTheme } from "$lib/stores/theme";
   import { TEMP_PASSWORD_LENGTH } from "$lib/auth/password-policy";
   import {
     applyGitHubUpdate,
@@ -440,6 +441,16 @@
               <Badge tone={$currentUser?.role === "admin" ? "ai" : "ok"}>
                 {$currentUser?.role}
               </Badge>
+            </div>
+
+            <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-3">
+              <div>
+                <p class="text-sm font-medium text-[var(--color-text)]">Aspecto</p>
+                <p class="mt-0.5 text-xs text-[var(--color-muted)]">Tema {$theme === "dark" ? "oscuro" : "claro"}, guardado en este dispositivo.</p>
+              </div>
+              <Button variant="secondary" onclick={toggleTheme} data-theme-toggle>
+                Usar modo {$theme === "dark" ? "claro" : "oscuro"}
+              </Button>
             </div>
 
             <form

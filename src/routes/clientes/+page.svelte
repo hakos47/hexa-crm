@@ -108,17 +108,17 @@
       <Card>
         <div class="flex items-start justify-between gap-2">
           <div>
-            <h3 class="font-semibold text-slate-100">{c.name}</h3>
+            <h3 class="font-semibold text-[var(--color-text)]">{c.name}</h3>
             {#if c.nif}
-              <p class="text-xs text-slate-500">NIF {c.nif}</p>
+              <p class="text-xs text-[var(--color-muted-dim)]">NIF {c.nif}</p>
             {/if}
           </div>
           <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openEdit(c)}>Editar</Button>
         </div>
-        <div class="mt-3 space-y-1 text-sm text-slate-400">
+        <div class="mt-3 space-y-1 text-sm text-[var(--color-muted)]">
           {#if c.email}<p>{c.email}</p>{/if}
           {#if c.phone}<p>{c.phone}</p>{/if}
-          {#if c.notes}<p class="text-xs text-slate-500">{c.notes}</p>{/if}
+          {#if c.notes}<p class="text-xs text-[var(--color-muted-dim)]">{c.notes}</p>{/if}
         </div>
       </Card>
     {/each}

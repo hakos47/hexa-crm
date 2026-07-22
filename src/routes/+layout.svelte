@@ -26,6 +26,7 @@
   import { showToast } from "$lib/stores/ui";
   import { isOnboardingDone } from "$lib/onboarding/state";
   import { PRODUCT_DISPLAY_NAME } from "$lib/product";
+  import { initTheme, theme, toggleTheme } from "$lib/stores/theme";
 
   let { children } = $props();
   let mobileNavOpen = $state(false);
@@ -81,6 +82,7 @@
   });
 
   onMount(async () => {
+    initTheme();
     const token = $session.token;
     if (!token) {
       clearSession();
@@ -298,6 +300,15 @@
             </p>
             <p class="text-[11px] capitalize text-radiant">{$session.user?.role}</p>
           </div>
+          <Button
+            variant="ghost"
+            class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"
+            onclick={toggleTheme}
+            aria-label={$theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+            title={$theme === "dark" ? "Modo claro" : "Modo oscuro"}
+          >
+            {$theme === "dark" ? "☀" : "◐"}
+          </Button>
           <Button
             variant="secondary"
             class="!px-2.5 !py-1.5 text-xs sm:!px-3 sm:text-sm"

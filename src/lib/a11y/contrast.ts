@@ -35,4 +35,7 @@ export const DESIGN_TOKENS = {
   text: "#f3eefc",
   muted: "#c4b8d9",
   mutedDim: "#9a90b0",
+  bgLight: "#ffffff",
+  textLight: "#20162d",
+  mutedLight: "#5d526c",
 } as const;

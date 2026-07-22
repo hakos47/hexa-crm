@@ -20,4 +20,9 @@ describe("design token contrast (open source a11y baseline)", () => {
     const r = contrastRatio(DESIGN_TOKENS.mutedDim, DESIGN_TOKENS.bgObsidian);
     expect(r).toBeGreaterThanOrEqual(3);
   });
+
+  it("light theme text tokens meet AA on its panel surface", () => {
+    expect(contrastRatio(DESIGN_TOKENS.textLight, DESIGN_TOKENS.bgLight)).toBeGreaterThanOrEqual(7);
+    expect(contrastRatio(DESIGN_TOKENS.mutedLight, DESIGN_TOKENS.bgLight)).toBeGreaterThanOrEqual(4.5);
+  });
 });

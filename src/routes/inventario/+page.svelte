@@ -323,7 +323,7 @@
   <Card lift={false} class="overflow-hidden p-0">
     <div class="w-full max-w-full overflow-x-auto">
       <table class="w-full min-w-[36rem] text-left text-sm">
-        <thead class="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
+        <thead class="border-b border-[var(--color-border-soft)] text-xs uppercase tracking-wide text-[var(--color-muted-dim)]">
           <tr>
             <th class="px-4 py-3 font-medium">Producto</th>
             <th class="px-4 py-3 font-medium">Categoría</th>
@@ -338,17 +338,17 @@
         <tbody>
           {#each filtered as p}
             {@const cover = coverFor(p)}
-            <tr class="border-b border-white/5 transition hover:bg-white/[0.03]">
+            <tr class="border-b border-[var(--color-border-soft)] transition hover:bg-[var(--color-purple-mist)]">
               <td class="px-4 py-3">
-                <p class="font-medium text-slate-100">{p.name}</p>
-                <p class="text-xs text-slate-500">{p.sku}</p>
+                <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+                <p class="text-xs text-[var(--color-muted-dim)]">{p.sku}</p>
               </td>
               <td class="px-4 py-3 text-sm text-[var(--color-muted)]">
                 {p.category || "—"}
               </td>
               <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
-                  <span class="tabular {p.stock <= p.min_stock ? 'text-rose-300' : 'text-slate-200'}">
+                  <span class="tabular {p.stock <= p.min_stock ? 'text-rose-300' : 'text-[var(--color-text)]'}">
                     {p.stock}
                   </span>
                   {#if p.stock <= p.min_stock}
@@ -372,7 +372,7 @@
               <td class="px-4 py-3">
                 <Badge tone="vat">{p.vat_rate}%</Badge>
               </td>
-              <td class="px-4 py-3 tabular text-slate-400">{formatEUR(p.cost_cents)}</td>
+              <td class="px-4 py-3 tabular text-[var(--color-muted)]">{formatEUR(p.cost_cents)}</td>
               <td class="px-4 py-3">
                 <div class="flex justify-end gap-1">
                   <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openStock(p)}>
