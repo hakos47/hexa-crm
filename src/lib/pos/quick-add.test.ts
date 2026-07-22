@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveQuickAdd } from "./quick-add";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const catalog = [
   { id: 1, sku: "CAF-001", name: "Café", stock: 10, active: true },
@@ -29,5 +31,17 @@ describe("resolveQuickAdd", () => {
   it("skips zero stock and inactive", () => {
     expect(resolveQuickAdd("OUT", catalog).kind).toBe("none");
     expect(resolveQuickAdd("OLD", catalog).kind).toBe("none");
+  });
+});
+
+describe("TPV express UI (#15)", () => {
+  const source = readFileSync(resolve(__dirname, "../../routes/ventas/+page.svelte"), "utf8");
+
+  it("ships persisted favorites and F2/Escape shortcuts", () => {
+    expect(source).toContain("hexa-crm-pos-favorites-v1");
+    expect(source).toContain("data-pos-favorites");
+    expect(source).toMatch(/event\.key === "F2"/);
+    expect(source).toMatch(/event\.key === "Escape"/);
+    expect(source).toContain("min-h-11");
   });
 });

@@ -14,6 +14,7 @@
   import { showToast } from "$lib/stores/ui";
   import { resolveQuickAdd } from "$lib/pos/quick-add";
   import { downloadCsv, salesToCsv } from "$lib/export/csv";
+  import { MAX_POS_FAVORITES, normalizeFavoriteIds, toggleFavoriteId } from "$lib/pos/favorites";
 
   let products = $state<Product[]>([]);
   let customers = $state<Customer[]>([]);
@@ -29,6 +30,8 @@
   let loading = $state(true);
   let submitting = $state(false);
   let selectedSale = $state<Sale | null>(null);
+  let favoriteIds = $state<number[]>([]);
+  let searchInput: HTMLInputElement | undefined = $state();
 
   const filteredProducts = $derived(
     products.filter(
@@ -38,6 +41,11 @@
         (p.name.toLowerCase().includes(productQuery.toLowerCase()) ||
           p.sku.toLowerCase().includes(productQuery.toLowerCase()))
     )
+  );
+  const favoriteProducts = $derived(
+    favoriteIds
+      .map((id) => products.find((p) => p.id === id))
+      .filter((p): p is Product => !!p && p.active && p.stock > 0),
   );
 
   const discountPlan = $derived(
@@ -81,13 +89,44 @@
     }
   }
 
-  onMount(async () => {
+  async function initializeTpv() {
+    try {
+      favoriteIds = normalizeFavoriteIds(JSON.parse(localStorage.getItem("hexa-crm-pos-favorites-v1") || "[]"));
+    } catch {
+      favoriteIds = [];
+    }
     await load();
     // Acceso rápido "Nueva venta": forzar pestaña TPV
     if ($page.url.searchParams.get("nuevo") === "1") {
       tab = "tpv";
     }
+  }
+
+  onMount(() => {
+    void initializeTpv();
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.key === "F2") {
+        event.preventDefault();
+        tab = "tpv";
+        queueMicrotask(() => searchInput?.focus());
+      } else if (event.key === "Escape" && tab === "tpv" && productQuery) {
+        productQuery = "";
+        searchInput?.focus();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
   });
+
+  function toggleFavorite(productId: number) {
+    const next = toggleFavoriteId(favoriteIds, productId);
+    if (next.length === favoriteIds.length && !favoriteIds.includes(productId)) {
+      showToast(`Puedes fijar hasta ${MAX_POS_FAVORITES} favoritos`, "info");
+      return;
+    }
+    favoriteIds = next;
+    localStorage.setItem("hexa-crm-pos-favorites-v1", JSON.stringify(next));
+  }
 
   function addToCart(p: Product) {
     const existing = cart.find((c) => c.product.id === p.id);
@@ -329,28 +368,58 @@
 {:else if tab === "tpv"}
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-5">
     <Card class="min-w-0 xl:col-span-3" lift={false}>
+      {#if favoriteProducts.length}
+        <div class="mb-3" data-pos-favorites>
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <p class="section-label !normal-case !tracking-wide">Favoritos</p>
+            <span class="text-[11px] text-[var(--color-muted-dim)]">1 toque para añadir</span>
+          </div>
+          <div class="flex gap-2 overflow-x-auto pb-1">
+            {#each favoriteProducts as p (p.id)}
+              <button
+                class="min-h-11 min-w-32 shrink-0 rounded-xl border border-purple-400/30 bg-purple-500/10 px-3 py-2 text-left transition hover:bg-purple-500/20"
+                onclick={() => addToCart(p)}
+                title={`Añadir ${p.name}`}
+              >
+                <p class="max-w-32 truncate text-sm font-medium text-[var(--color-text)]">{p.name}</p>
+                <p class="mt-0.5 text-xs tabular text-radiant">{formatEUR(p.price_cents)}</p>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <input
+        bind:this={searchInput}
         bind:value={productQuery}
-        placeholder="Buscar o escanear SKU… (Enter)"
+        placeholder="Buscar o escanear SKU… (F2 / Enter)"
         class="field mb-1 w-full text-sm"
         onkeydown={onSearchKeydown}
       />
       <p class="mb-3 text-[11px] text-[var(--color-muted-dim)]">
-        Enter = añadir por SKU exacto o única coincidencia (estilo pistola código de barras).
+        F2 = buscar · Esc = limpiar búsqueda · Enter = añadir por SKU exacto o única coincidencia.
       </p>
       <div class="grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
         {#each filteredProducts as p}
-          <button
+          <div
             class="rounded-xl border border-[var(--color-border)] bg-black/20 p-3 text-left transition hover:border-purple-400/35 hover:bg-purple-500/10"
-            onclick={() => addToCart(p)}
           >
-            <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+            <div class="flex items-start justify-between gap-2">
+              <button class="min-h-11 min-w-0 flex-1 text-left" onclick={() => addToCart(p)}>
+                <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+              </button>
+              <button
+                class="min-h-11 min-w-11 rounded-lg border border-[var(--color-border)] text-lg text-[var(--color-purple)] hover:bg-purple-500/10"
+                onclick={() => toggleFavorite(p.id)}
+                aria-label={favoriteIds.includes(p.id) ? `Quitar ${p.name} de favoritos` : `Fijar ${p.name} como favorito`}
+                title={favoriteIds.includes(p.id) ? "Quitar favorito" : "Fijar favorito"}
+              >{favoriteIds.includes(p.id) ? "★" : "☆"}</button>
+            </div>
             <div class="mt-1 flex flex-wrap items-center justify-between gap-1 text-xs text-[var(--color-muted-dim)]">
               <span class="break-all">{p.sku} · stock {p.stock}</span>
               <span class="tabular text-radiant">{formatEUR(p.price_cents)}</span>
             </div>
             <Badge tone="vat">{p.vat_rate}% IVA</Badge>
-          </button>
+          </div>
         {:else}
           <p class="col-span-full py-8 text-center text-sm text-[var(--color-muted-dim)]">
             No hay productos con stock.
@@ -462,7 +531,7 @@
           </div>
         </div>
 
-        <Button class="w-full" disabled={submitting} onclick={checkout}>
+        <Button class="min-h-11 w-full" disabled={submitting} onclick={checkout}>
           {submitting ? "Procesando…" : "Cobrar y registrar"}
         </Button>
       {/if}

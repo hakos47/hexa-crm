@@ -20,6 +20,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Recordatorio de copia en dashboard, fecha persistente y validación de checksum antes de restaurar en modo local (#19).
 - Modo claro persistente, tokens de contraste, movimiento reducido y guía del design system (#18).
 - Vista local de reposición con cálculo por ventas, cantidades editables y CSV para proveedor (#16).
+- TPV express con hasta ocho favoritos persistentes, chips táctiles y atajos F2/Esc (#15).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).
