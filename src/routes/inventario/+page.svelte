@@ -18,9 +18,10 @@
     productCsvTemplate,
     productsToCsv,
   } from "$lib/import/product-csv";
-  import { downloadCsv } from "$lib/export/csv";
+  import { downloadCsv, reorderSuggestionsToCsv } from "$lib/export/csv";
   import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
   import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
+  import { planReorderSuggestions } from "$lib/inventory/reorder";
 
   let products = $state<Product[]>([]);
   /** product_id → units sold (net) last 14 days */
@@ -36,6 +37,8 @@
   let stockDelta = $state("1");
   let stockReason = $state("Reposición");
   let fileInput: HTMLInputElement | undefined = $state();
+  let showReorder = $state(false);
+  let reorderQty = $state<Record<number, number>>({});
 
   let form = $state({
     sku: "",
@@ -69,6 +72,7 @@
   );
 
   const HORIZON_DAYS = 14;
+  const reorderSuggestions = $derived(planReorderSuggestions(products, sold14d, HORIZON_DAYS));
 
   async function loadSoldMap() {
     try {
@@ -132,7 +136,23 @@
     if ($page.url.searchParams.get("nuevo") === "1") {
       openCreate();
     }
+    showReorder = $page.url.searchParams.get("reponer") === "1";
   });
+
+  function reorderQuantity(suggestion: (typeof reorderSuggestions)[number]) {
+    return reorderQty[suggestion.product_id] ?? suggestion.qty_suggested;
+  }
+
+  function exportReorder() {
+    const rows = reorderSuggestions
+      .map((suggestion) => ({ ...suggestion, qty_suggested: Math.max(0, Math.trunc(reorderQuantity(suggestion))) }))
+      .filter((suggestion) => suggestion.qty_suggested > 0);
+    if (!rows.length) {
+      showToast("No hay líneas de reposición para exportar", "info");
+      return;
+    }
+    downloadCsv(`pedido-proveedor-${new Date().toISOString().slice(0, 10)}.csv`, reorderSuggestionsToCsv(rows));
+  }
 
   function openCreate() {
     editing = null;
@@ -309,9 +329,47 @@
     <Button variant="secondary" onclick={triggerImport} disabled={importing}>
       {importing ? "Importando…" : "Importar CSV"}
     </Button>
+    <Button variant={showReorder ? "primary" : "secondary"} onclick={() => (showReorder = !showReorder)}>
+      Reponer {reorderSuggestions.length ? `(${reorderSuggestions.length})` : ""}
+    </Button>
     <Button onclick={openCreate}>+ Nuevo producto</Button>
   </div>
 </div>
+
+{#if showReorder && !loading}
+  <Card class="mb-4 border border-amber-400/25 bg-amber-500/[0.06]" lift={false} data-reorder-panel>
+    <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="section-label mb-1 !text-amber-200">Reposición sugerida</p>
+        <h2 class="text-base font-semibold text-[var(--color-text)]">Pedido local para proveedor</h2>
+        <p class="mt-1 text-xs text-[var(--color-muted)]">Calculado con stock mínimo y ventas netas de los últimos {HORIZON_DAYS} días. Edita cantidades antes de exportar.</p>
+      </div>
+      <Button variant="secondary" onclick={exportReorder} disabled={!reorderSuggestions.length}>Exportar pedido CSV</Button>
+    </div>
+    {#if !reorderSuggestions.length}
+      <p class="text-sm text-[var(--color-muted)]">No hay productos que requieran reposición ahora.</p>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[38rem] text-left text-sm">
+          <thead class="border-b border-[var(--color-border-soft)] text-xs uppercase text-[var(--color-muted-dim)]">
+            <tr><th class="py-2 pr-3">Producto</th><th class="py-2 pr-3">Stock</th><th class="py-2 pr-3">Cobertura</th><th class="py-2 pr-3">Prioridad</th><th class="py-2 text-right">Pedir</th></tr>
+          </thead>
+          <tbody>
+            {#each reorderSuggestions as suggestion (suggestion.product_id)}
+              <tr class="border-b border-[var(--color-border-soft)] last:border-0">
+                <td class="py-2.5 pr-3"><p class="font-medium text-[var(--color-text)]">{suggestion.name}</p><p class="text-xs text-[var(--color-muted-dim)]">{suggestion.sku}</p></td>
+                <td class="py-2.5 pr-3 tabular">{suggestion.stock} <span class="text-xs text-[var(--color-muted-dim)]">/ mín {suggestion.min_stock}</span></td>
+                <td class="py-2.5 pr-3 tabular">{suggestion.days_of_cover === null ? "sin ventas" : `~${suggestion.days_of_cover} d`}</td>
+                <td class="py-2.5 pr-3"><Badge tone={suggestion.priority === "critical" ? "danger" : "warn"}>{suggestion.priority === "critical" ? "crítico" : "vigilar"}</Badge></td>
+                <td class="py-2.5 text-right"><input class="field w-20 py-1 text-right tabular" type="number" min="0" value={reorderQuantity(suggestion)} oninput={(event) => { reorderQty = { ...reorderQty, [suggestion.product_id]: Number((event.currentTarget as HTMLInputElement).value) || 0 }; }} /></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </Card>
+{/if}
 
 {#if loading}
   <div class="skeleton h-64"></div>

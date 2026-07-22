@@ -19,6 +19,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Bloqueo de sesión por inactividad configurable (15 min por defecto; 0 lo desactiva) y ajustes restringidos por rol (#21).
 - Recordatorio de copia en dashboard, fecha persistente y validación de checksum antes de restaurar en modo local (#19).
 - Modo claro persistente, tokens de contraste, movimiento reducido y guía del design system (#18).
+- Vista local de reposición con cálculo por ventas, cantidades editables y CSV para proveedor (#16).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

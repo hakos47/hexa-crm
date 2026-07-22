@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeCsvCell, salesToCsv, toCsv, vatSummaryToCsv } from "./csv";
+import { escapeCsvCell, reorderSuggestionsToCsv, salesToCsv, toCsv, vatSummaryToCsv } from "./csv";
 
 describe("csv export", () => {
   it("escapes commas and quotes", () => {
@@ -36,6 +36,15 @@ describe("csv export", () => {
     expect(lines.length).toBe(3);
     expect(csv).toContain("21");
     expect(csv).toContain("10");
+  });
+
+  it("builds editable supplier reorder rows", () => {
+    const csv = reorderSuggestionsToCsv([
+      { sku: "A-1", name: "Café, 250g", stock: 2, min_stock: 5, qty_suggested: 19 },
+    ]);
+    expect(csv).toContain("cantidad_sugerida");
+    expect(csv).toContain('"Café, 250g"');
+    expect(csv).toContain(",19");
   });
 
   it("toCsv ends with newline", () => {

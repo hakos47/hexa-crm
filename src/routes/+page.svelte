@@ -159,7 +159,7 @@
             })}
             <li>
               <a
-                href="/inventario"
+                href="/inventario?reponer=1"
                 class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-2.5 transition hover:border-purple-400/25 hover:bg-purple-500/10"
               >
                 <div class="min-w-0">
