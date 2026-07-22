@@ -100,6 +100,10 @@
     if ($page.url.searchParams.get("nuevo") === "1") {
       tab = "tpv";
     }
+    const presetCustomerId = Number($page.url.searchParams.get("customerId"));
+    if (presetCustomerId && customers.some((customer) => customer.id === presetCustomerId)) {
+      customerId = String(presetCustomerId);
+    }
   }
 
   onMount(() => {
