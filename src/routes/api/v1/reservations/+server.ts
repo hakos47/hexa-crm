@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { json, type RequestHandler } from "@sveltejs/kit";
-import { initDb, sql } from "$lib/api/postgres-db";
+import { CENTRAL_MODE, initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
 import { setTenantRls } from "$lib/api/tenant-rls";
@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   let input: { lines?: { product_id: number; qty: number }[]; expires_at?: string; external_customer_id?: string; correlation_id?: string };
   try { input = JSON.parse(body); } catch { return error("JSON inválido", "invalid_json", 400, requestId); }
   if (!Array.isArray(input.lines) || !input.lines.length || input.lines.some((line) => !Number.isInteger(line.product_id) || !Number.isInteger(line.qty) || line.qty <= 0)) return error("Líneas de reserva inválidas", "invalid_lines", 400, requestId);
-  await initDb();
+  if (!CENTRAL_MODE) await initDb();
   const tenant = await sql`SELECT id FROM companies WHERE code = ${key.tenantCode} AND active = TRUE`;
   if (!tenant[0]) return error("Tenant no disponible", "unknown_tenant", 403, requestId);
   const payloadHash = createHash("sha256").update(body).digest("hex");

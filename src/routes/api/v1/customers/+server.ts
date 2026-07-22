@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
-import { initDb, sql } from "$lib/api/postgres-db";
+import { CENTRAL_MODE, initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
 import { setTenantRls } from "$lib/api/tenant-rls";
@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   if (input.source !== "meiga" || !input.external_user_id || !input.name || input.name.length > 200) return fail("invalid_external_identity", 400, requestId);
   const externalUserId = input.external_user_id;
   const name = input.name;
-  await initDb();
+  if (!CENTRAL_MODE) await initDb();
   const tenant = await sql`SELECT id FROM companies WHERE code = ${key.tenantCode} AND active = TRUE`;
   if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
   try {

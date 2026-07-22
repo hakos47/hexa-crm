@@ -57,7 +57,7 @@ function resolveDatabaseUrl(): string {
 }
 
 const DATABASE_URL = resolveDatabaseUrl();
-const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
+export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
 
 let sql: postgres.Sql;
 

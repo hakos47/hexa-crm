@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
-import { initDb, sql } from "$lib/api/postgres-db";
+import { CENTRAL_MODE, initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
 import { setTenantRls } from "$lib/api/tenant-rls";
@@ -16,7 +16,7 @@ export const DELETE: RequestHandler = async ({ request, params, url }) => {
   const signature = request.headers.get("X-Hexa-Signature") ?? "";
   const verification = verifyServiceRequest({ keyId, signature, timestamp: request.headers.get("X-Hexa-Timestamp") ?? "", method: "DELETE", path: url.pathname, body: "" }, key.secret);
   if (!verification.ok) return fail(verification.code, 401, requestId);
-  await initDb();
+  if (!CENTRAL_MODE) await initDb();
   const tenant = await sql`SELECT id FROM companies WHERE code = ${key.tenantCode} AND active = TRUE`;
   if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
   try {

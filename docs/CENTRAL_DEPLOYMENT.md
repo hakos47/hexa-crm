@@ -13,4 +13,6 @@ npm run central:provision-tenant
 
 El modo central no siembra usuarios ni datos demo. Haz backup/restauración en una instancia no productiva antes de publicar una versión; los secretos y las claves HMAC se rotan fuera del repositorio.
 
-Las tablas comerciales tienen RLS por `company_id`. La API central fija `app.company_id` con `SET LOCAL` dentro de cada transacción; la conexión de producción debe usar un rol no propietario para que PostgreSQL aplique esas políticas.
+Antes de servir tráfico, crea el rol restringido: `npm run central:provision-api-role` con una conexión propietaria y `HEXA_API_DB_USER` / `HEXA_API_DB_PASSWORD`. Configura después `HEXA_API_DATABASE_URL` para que la API use ese rol, no el propietario.
+
+Las tablas comerciales tienen RLS por `company_id`. La API central fija `app.company_id` con `SET LOCAL` dentro de cada transacción; el rol no propietario hace que PostgreSQL aplique esas políticas.
