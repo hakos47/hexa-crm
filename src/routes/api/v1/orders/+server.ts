@@ -7,6 +7,38 @@ import { setTenantRls } from "$lib/api/tenant-rls";
 
 const fail = (code: string, status: number, requestId: string) => json({ error: "No se pudo confirmar el pedido", code, request_id: requestId }, { status });
 
+/**
+ * Read the canonical commercial history for one external buyer.  Meiga keeps
+ * authentication in D1, but never its order ledger once the central CRM is on.
+ */
+export const GET: RequestHandler = async ({ request, url }) => {
+  const requestId = crypto.randomUUID();
+  const keyId = request.headers.get("X-Hexa-Key-Id") ?? "";
+  const key = findServiceKey(serviceKeysFromEnv(process.env.HEXA_SERVICE_KEYS), keyId);
+  if (!key) return fail("unknown_key", 401, requestId);
+  const verification = verifyServiceRequest({ keyId, signature: request.headers.get("X-Hexa-Signature") ?? "", timestamp: request.headers.get("X-Hexa-Timestamp") ?? "", method: "GET", path: url.pathname, body: "" }, key.secret);
+  if (!verification.ok) return fail(verification.code, 401, requestId);
+  const externalCustomerId = url.searchParams.get("external_customer_id")?.trim();
+  if (!externalCustomerId || externalCustomerId.length > 200) return fail("external_customer_required", 400, requestId);
+  if (!CENTRAL_MODE) await initDb();
+  const tenant = await sql`SELECT id FROM companies WHERE code = ${key.tenantCode} AND active = TRUE`;
+  if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
+  const orders = await sql.begin(async (tx) => {
+    await setTenantRls(tx, tenant[0].id);
+    return tx`
+      SELECT o.id, o.status, o.total_cents, o.created_at,
+             COALESCE(string_agg(p.name, ' · ' ORDER BY p.name), '') AS items
+      FROM orders o
+      LEFT JOIN order_lines ol ON ol.order_id = o.id
+      LEFT JOIN products p ON p.id = ol.product_id
+      WHERE o.company_id = ${tenant[0].id} AND o.external_customer_id = ${externalCustomerId}
+      GROUP BY o.id
+      ORDER BY o.created_at DESC
+      LIMIT 50`;
+  });
+  return json({ data: orders.map((order) => ({ ...order, currency: "EUR" })), request_id: requestId });
+};
+
 export const POST: RequestHandler = async ({ request, url }) => {
   const requestId = crypto.randomUUID();
   const body = await request.text();

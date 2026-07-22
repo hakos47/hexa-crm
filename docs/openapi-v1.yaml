@@ -121,6 +121,15 @@ paths:
     get:
       summary: KPIs operativos y alertas de stock del tenant del operador
       security: [{ operatorBearer: [] }]
+  /orders:
+    get:
+      summary: Historial canónico de pedidos de un comprador externo del tenant
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: external_customer_id, in: query, required: true, schema: { type: string } }
+    post:
+      summary: Confirma una reserva como pedido canónico
+      security: [{ serviceHmac: [] }]
 components:
   securitySchemes:
     serviceHmac:
