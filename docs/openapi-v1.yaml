@@ -46,6 +46,14 @@ paths:
       security: [{ serviceHmac: [] }]
       responses:
         '200': { description: Cliente enlazado sin credenciales externas }
+  /orders:
+    post:
+      summary: Confirma una reserva como pedido sin descontar stock por segunda vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Pedido canónico creado }
 components:
   securitySchemes:
     serviceHmac:

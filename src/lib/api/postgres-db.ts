@@ -199,6 +199,27 @@ export async function initDb() {
       PRIMARY KEY (reservation_id, product_id)
     );
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS orders (
+      id UUID PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      reservation_id UUID UNIQUE REFERENCES reservations(id) ON DELETE RESTRICT,
+      external_customer_id TEXT,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled')),
+      total_cents INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS order_lines (
+      order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+      qty INTEGER NOT NULL CHECK (qty > 0),
+      unit_price_cents INTEGER NOT NULL,
+      PRIMARY KEY (order_id, product_id)
+    );
+  `;
 
   await sql`
     CREATE TABLE IF NOT EXISTS stock_movements (
@@ -319,7 +340,7 @@ export async function initDb() {
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
-  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "external_customer_identities", "semantic_documents", "idempotency_keys", "service_audit_log"] as const) {
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "idempotency_keys", "service_audit_log"] as const) {
     const policy = `${table}_tenant_isolation`;
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
@@ -337,7 +358,7 @@ export async function initDb() {
     await seedCompaniesPg();
     await seedProductsAndCustomers();
   }
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0007_tenant_rls') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0008_orders') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {
