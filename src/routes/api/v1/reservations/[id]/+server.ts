@@ -20,6 +20,9 @@ export const DELETE: RequestHandler = async ({ request, params, url }) => {
   if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
   try {
     const response = await sql.begin(async (tx) => {
+      await tx`DELETE FROM service_request_replays WHERE expires_at < NOW()`;
+      const replay = await tx`INSERT INTO service_request_replays (key_id, signature, expires_at) VALUES (${keyId}, ${signature}, NOW() + INTERVAL '5 minutes') ON CONFLICT DO NOTHING RETURNING signature`;
+      if (!replay.length) throw new Error("replay");
       const rows = await tx`SELECT id, status FROM reservations WHERE id = ${reservationId} AND company_id = ${tenant[0].id} FOR UPDATE`;
       if (!rows[0]) throw new Error("not_found");
       if (rows[0].status !== "reserved") return { reservation_id: reservationId, status: rows[0].status, restored: false };
@@ -34,6 +37,7 @@ export const DELETE: RequestHandler = async ({ request, params, url }) => {
     });
     return json({ ...response, request_id: requestId });
   } catch (cause) {
-    return fail(cause instanceof Error ? cause.message : "cancel_failed", cause instanceof Error && cause.message === "not_found" ? 404 : 500, requestId);
+    const code = cause instanceof Error ? cause.message : "cancel_failed";
+    return fail(code, code === "not_found" ? 404 : code === "replay" ? 409 : 500, requestId);
   }
 };
