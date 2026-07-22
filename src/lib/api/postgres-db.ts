@@ -58,7 +58,7 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
-export const CENTRAL_SCHEMA_VERSION = "0011_operator_sessions";
+export const CENTRAL_SCHEMA_VERSION = "0012_semantic_metrics";
 
 let sql: postgres.Sql;
 
@@ -175,6 +175,18 @@ export async function initDb() {
       UNIQUE (company_id, entity_type, entity_id, document_version)
     );
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS semantic_metrics (
+      id BIGSERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      operation TEXT NOT NULL CHECK (operation IN ('index', 'search')),
+      outcome TEXT NOT NULL CHECK (outcome IN ('ready', 'failed')),
+      latency_ms INTEGER NOT NULL CHECK (latency_ms >= 0),
+      queue_depth INTEGER NOT NULL DEFAULT 0 CHECK (queue_depth >= 0),
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS semantic_metrics_tenant_created_idx ON semantic_metrics (company_id, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS semantic_documents_tenant_entity_idx ON semantic_documents (company_id, entity_type, updated_at DESC)`;
   await sql`
     CREATE TABLE IF NOT EXISTS reservations (
@@ -374,7 +386,7 @@ export async function initDb() {
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
-  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "idempotency_keys", "service_audit_log"] as const) {
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log"] as const) {
     const policy = `${table}_tenant_isolation`;
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);

@@ -18,7 +18,7 @@ try {
   await sql.unsafe(`GRANT USAGE ON SCHEMA public TO ${user}`);
   await sql.unsafe(`GRANT SELECT, INSERT, DELETE ON operator_sessions TO ${user}`);
   await sql.unsafe(`GRANT SELECT ON companies, schema_migrations, pg_extension, operator_accounts TO ${user}`);
-  await sql.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON products, customers, sales, sale_lines, cash_movements, reservations, reservation_lines, orders, order_lines, external_customer_identities, semantic_documents, idempotency_keys, service_request_replays, service_audit_log TO ${user}`);
+  await sql.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON products, customers, sales, sale_lines, cash_movements, reservations, reservation_lines, orders, order_lines, external_customer_identities, semantic_documents, semantic_metrics, idempotency_keys, service_request_replays, service_audit_log TO ${user}`);
   await sql.unsafe(`GRANT INSERT ON stock_movements TO ${user}`);
   await sql.unsafe(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${user}`);
   console.log(JSON.stringify({ api_db_user: user, rls: "enforced for non-owner role" }));

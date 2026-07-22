@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { json, type RequestHandler } from "@sveltejs/kit";
 import { embedSemanticText, vectorLiteral } from "$lib/ai/ollama-embeddings";
 import { canIndexSemanticEntity } from "$lib/ai/semantic-index";
+import { semanticMetric } from "$lib/ai/semantic-metrics";
 import { CENTRAL_MODE, initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
@@ -10,6 +11,7 @@ import { setTenantRls } from "$lib/api/tenant-rls";
 const fail = (code: string, status: number, requestId: string) => json({ error: "No se pudo indexar el documento", code, request_id: requestId }, { status });
 
 export const POST: RequestHandler = async ({ request, url }) => {
+  const startedAt = Date.now();
   const requestId = crypto.randomUUID();
   const body = await request.text();
   const keyId = request.headers.get("X-Hexa-Key-Id") ?? "";
@@ -44,6 +46,8 @@ export const POST: RequestHandler = async ({ request, url }) => {
       } else {
         await tx`INSERT INTO semantic_documents (id, company_id, entity_type, entity_id, document_version, normalized_text, embedding_status) VALUES (${crypto.randomUUID()}, ${tenant[0].id}, ${entityType}, ${entityId}, ${documentVersion}, ${text}, 'failed') ON CONFLICT (company_id, entity_type, entity_id, document_version) DO UPDATE SET normalized_text = EXCLUDED.normalized_text, embedding_status = 'failed', updated_at = NOW()`;
       }
+      const metric = semanticMetric({ operation: "index", outcome: embedding ? "ready" : "failed", startedAt });
+      await tx`INSERT INTO semantic_metrics (company_id, operation, outcome, latency_ms, queue_depth) VALUES (${tenant[0].id}, ${metric.operation}, ${metric.outcome}, ${metric.latencyMs}, ${metric.queueDepth})`;
       await tx`INSERT INTO idempotency_keys (company_id, operation, key, payload_hash, response) VALUES (${tenant[0].id}, 'semantic.index', ${idempotencyKey}, ${payloadHash}, ${JSON.stringify(response)}::jsonb)`;
       await tx`INSERT INTO service_audit_log (company_id, key_id, action, request_id, correlation_id) VALUES (${tenant[0].id}, ${keyId}, 'semantic.index', ${requestId}, ${input.correlation_id ?? null})`;
       return response;
