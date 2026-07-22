@@ -20,6 +20,7 @@ services:
       PORT: 3000
       HEXA_CENTRAL_MODE: "1"
       HEXA_SERVICE_KEYS: ${HEXA_SERVICE_KEYS:-[]}
+      HEXA_MIGRATION_TOKEN: ${HEXA_MIGRATION_TOKEN:-}
     depends_on:
       db: { condition: service_healthy }
     ports: ["${HEXA_API_PORT:-3001}:3000"]
