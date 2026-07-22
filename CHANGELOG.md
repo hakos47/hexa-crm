@@ -25,6 +25,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Dashboard con deltas diarios, tendencia de siete días y alertas enlazadas (#13).
 - Copiloto local con herramientas de ventas, stock y reposición basadas en datos reales (#14).
 - Base de API central v1 con OpenAPI, health/readiness y receta PostgreSQL 18 + pgvector (#26).
+- Índice semántico privado por tenant, sin clientes ni ventas, preparado para embeddings locales (#32).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

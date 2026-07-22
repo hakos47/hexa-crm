@@ -136,6 +136,22 @@ export async function initDb() {
     );
   `;
   await sql`
+    CREATE TABLE IF NOT EXISTS semantic_documents (
+      id UUID PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL CHECK (entity_type IN ('product', 'evidence', 'proposal', 'review')),
+      entity_id TEXT NOT NULL,
+      document_version TEXT NOT NULL,
+      normalized_text TEXT NOT NULL,
+      embedding vector(768),
+      embedding_status TEXT NOT NULL DEFAULT 'pending' CHECK (embedding_status IN ('pending', 'ready', 'failed')),
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      UNIQUE (company_id, entity_type, entity_id, document_version)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS semantic_documents_tenant_entity_idx ON semantic_documents (company_id, entity_type, updated_at DESC)`;
+  await sql`
     CREATE TABLE IF NOT EXISTS reservations (
       id UUID PRIMARY KEY,
       company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -302,7 +318,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0004_external_customers') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0005_semantic_index') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {

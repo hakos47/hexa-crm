@@ -10,7 +10,7 @@ export const GET: RequestHandler = async () => {
       SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations') AS table_exists
     `;
     const applied = migrations[0]?.table_exists
-      ? await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0004_external_customers') AS ready`
+      ? await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0005_semantic_index') AS ready`
       : [{ ready: false }];
     const vector = await sql`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS ready`;
     const result = centralHealthStatus({
