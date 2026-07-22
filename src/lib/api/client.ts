@@ -145,7 +145,7 @@ export const api = {
   createCashMovement: (input: CashInput) => remoteOperatorConfig ? remoteWriteUnavailable() : call<CashMovement>("create_cash_movement", { input }),
   getCashBalance: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<number>("get_cash_balance"),
   vatSummary: (from: string, to: string) => remoteOperatorConfig ? remoteWriteUnavailable() : call<VatSummary>("vat_summary", { from, to }),
-  dashboardStats: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<DashboardStats>("dashboard_stats"),
+  dashboardStats: () => remoteOperatorConfig ? remoteOperatorApi.dashboard(requireRemoteConfig(), getToken() ?? "") : call<DashboardStats>("dashboard_stats"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (partial: Partial<Settings>) =>
     call<Settings>("update_settings", { partial }),

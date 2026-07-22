@@ -21,4 +21,9 @@ describe("remote operator adapter", () => {
     };
     await expect(remoteOperatorApi.products(config, "token", fetchImpl as typeof fetch)).resolves.toHaveLength(1);
   });
+
+  it("does not mask a central network failure as a local write", async () => {
+    const fetchImpl = async () => { throw new TypeError("network down"); };
+    await expect(remoteOperatorApi.saveCustomer(config, "token", { name: "Meiga" }, fetchImpl as typeof fetch)).rejects.toThrow("network down");
+  });
 });

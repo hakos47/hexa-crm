@@ -1,4 +1,4 @@
-import type { AuthUser, Customer, CustomerInput, LoginResult, Product, ProductInput, Sale, SaleLineInput } from "$lib/types";
+import type { AuthUser, Customer, CustomerInput, DashboardStats, LoginResult, Product, ProductInput, Sale, SaleLineInput } from "$lib/types";
 
 export type RemoteOperatorConfig = { endpoint: string; tenantCode: string };
 
@@ -49,6 +49,8 @@ export const remoteOperatorApi = {
     const data = await request<{ data: Sale[] }>(config, token, "/sales", fetchImpl);
     return data.data;
   },
+  dashboard: async (config: RemoteOperatorConfig, token: string, fetchImpl?: typeof fetch) =>
+    request<DashboardStats & { synchronized_at: string }>(config, token, "/dashboard", fetchImpl),
   saveProduct: (config: RemoteOperatorConfig, token: string, input: ProductInput, fetchImpl?: typeof fetch) => mutate<Product>(config, token, "/products", input, fetchImpl),
   saveCustomer: (config: RemoteOperatorConfig, token: string, input: CustomerInput, fetchImpl?: typeof fetch) => mutate<Customer>(config, token, "/customers", input, fetchImpl),
   createSale: (config: RemoteOperatorConfig, token: string, lines: SaleLineInput[], customerId: number | null, notes: string, fetchImpl?: typeof fetch) => mutate<Sale>(config, token, "/sales", { lines, customer_id: customerId, notes }, fetchImpl),

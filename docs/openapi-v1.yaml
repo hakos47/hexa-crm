@@ -117,6 +117,10 @@ paths:
       security: [{ operatorBearer: [] }]
       parameters:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+  /operator/dashboard:
+    get:
+      summary: KPIs operativos y alertas de stock del tenant del operador
+      security: [{ operatorBearer: [] }]
 components:
   securitySchemes:
     serviceHmac:

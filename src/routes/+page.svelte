@@ -12,6 +12,7 @@
   import { isOnboardingDone } from "$lib/onboarding/state";
   import { backupAgeDays, needsBackupReminder } from "$lib/backup/backup-status";
   import { dashboardHealth } from "$lib/dashboard/health";
+  import { session } from "$lib/stores/session";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
@@ -19,6 +20,7 @@
   let loading = $state(true);
   let onboardingPending = $state(false);
   let settings = $state<Settings | null>(null);
+  let centralSynchronizedAt = $state<string | null>(null);
 
   onMount(async () => {
     try {
@@ -28,6 +30,7 @@
         api.listSales(),
         api.getSettings(),
       ]);
+      centralSynchronizedAt = $session.remote ? new Date().toISOString() : null;
       // Build sold map for low-stock cover hints (last 14d, cap fetches)
       const cutoff = Date.now() - 14 * 86400000;
       const recentSales = sales
@@ -80,6 +83,11 @@
     {/each}
   </div>
 {:else if stats}
+  {#if $session.remote}
+    <p class="mb-4 rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100" data-central-status>
+      CRM central · tenant {$session.remote.tenantCode} · datos actualizados {centralSynchronizedAt ? new Date(centralSynchronizedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ahora"}. Sin conexión, las operaciones no se guardan localmente.
+    </p>
+  {/if}
   {#if onboardingPending}
     <Card class="mb-4 border border-purple-400/30 bg-purple-500/10" lift={false} data-onboarding-hint>
       <p class="text-sm font-medium text-[var(--color-purple-bright)]">Puesta en marcha pendiente</p>
