@@ -27,6 +27,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Base de API central v1 con OpenAPI, health/readiness y receta PostgreSQL 18 + pgvector (#26).
 - Índice semántico privado por tenant, sin clientes ni ventas, preparado para embeddings locales (#32).
 - Catálogo central con estado de publicación y metadatos de producto para el tenant Meiga (#28).
+- El despliegue central ya no inserta datos demo al migrar (#26).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

@@ -57,6 +57,7 @@ function resolveDatabaseUrl(): string {
 }
 
 const DATABASE_URL = resolveDatabaseUrl();
+const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
 
 let sql: postgres.Sql;
 
@@ -321,11 +322,14 @@ export async function initDb() {
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
 
-  // Seeders
-  await seedSettings();
-  await seedUsers();
-  await seedCompaniesPg();
-  await seedProductsAndCustomers();
+  // The local demo keeps its seed data. A central tenant service must start empty
+  // and be provisioned explicitly; it must never leak demo rows into a tenant.
+  if (!CENTRAL_MODE) {
+    await seedSettings();
+    await seedUsers();
+    await seedCompaniesPg();
+    await seedProductsAndCustomers();
+  }
   await sql`INSERT INTO schema_migrations (version) VALUES ('0006_central_catalog') ON CONFLICT (version) DO NOTHING`;
 }
 

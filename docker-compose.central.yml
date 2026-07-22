@@ -18,6 +18,7 @@ services:
       DATABASE_URL: postgresql://hexa:${POSTGRES_PASSWORD}@db:5432/hexa_crm
       HOST: 0.0.0.0
       PORT: 3000
+      HEXA_CENTRAL_MODE: "1"
       HEXA_SERVICE_KEYS: ${HEXA_SERVICE_KEYS:-[]}
     depends_on:
       db: { condition: service_healthy }
