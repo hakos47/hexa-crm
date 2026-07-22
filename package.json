@@ -40,7 +40,8 @@
     "hooks:install": "bash scripts/install-git-hooks.sh",
     "mcp:install": "npm install --prefix tools/mcp",
     "mcp:build": "npm run build --prefix tools/mcp",
-    "mcp:dev": "npm run dev --prefix tools/mcp"
+    "mcp:dev": "npm run dev --prefix tools/mcp",
+    "central:provision-tenant": "node scripts/provision-central-tenant.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
