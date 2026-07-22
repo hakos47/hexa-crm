@@ -1,0 +1,49 @@
+openapi: 3.1.0
+info:
+  title: HEXA CRM Central API
+  version: 1.0.0-draft
+  description: API versionada para integraciones tenant aisladas. Las mutaciones usan firma de servicio e Idempotency-Key.
+servers:
+  - url: https://crm.example.invalid/api/v1
+paths:
+  /health:
+    get:
+      summary: Disponibilidad de API, base, migraciones y pgvector
+      responses:
+        '200': { description: Preparada }
+        '503': { description: API viva pero dependencia no preparada }
+  /products:
+    get:
+      summary: Feed paginado de catálogo publicado
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 100 } }
+      responses:
+        '200': { description: Página de productos }
+  /reservations:
+    post:
+      summary: Reserva atómica de stock
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Reserva creada }
+        '409': { description: Stock insuficiente o clave reutilizada con payload distinto }
+        '401': { description: Firma de servicio inválida }
+components:
+  securitySchemes:
+    serviceHmac:
+      type: apiKey
+      in: header
+      name: X-Hexa-Signature
+  responses:
+    Error:
+      description: Error normalizado
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, code, request_id]
+            properties:
+              error: { type: string }
+              code: { type: string }
+              request_id: { type: string }

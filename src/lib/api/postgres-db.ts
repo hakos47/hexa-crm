@@ -87,6 +87,12 @@ function toIso(d: Date | string | null | undefined): string {
 export async function initDb() {
   // Asegurar extensión pgvector
   await sql`CREATE EXTENSION IF NOT EXISTS vector`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT PRIMARY KEY,
+      applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
 
   await sql`
     CREATE TABLE IF NOT EXISTS companies (
@@ -237,6 +243,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0001_core') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {
