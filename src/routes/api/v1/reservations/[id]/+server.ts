@@ -31,7 +31,7 @@ export const DELETE: RequestHandler = async ({ request, params, url }) => {
       const lines = await tx`SELECT product_id, qty FROM reservation_lines WHERE reservation_id = ${reservationId}`;
       for (const line of lines) {
         await tx`UPDATE products SET stock = stock + ${line.qty}, updated_at = NOW() WHERE id = ${line.product_id} AND company_id = ${tenant[0].id}`;
-        await tx`INSERT INTO stock_movements (product_id, delta, reason, ref_type, ref_id) VALUES (${line.product_id}, ${line.qty}, 'Cancelación de reserva', 'reservation', NULL)`;
+        await tx`INSERT INTO stock_movements (product_id, company_id, delta, reason, ref_type, ref_key) VALUES (${line.product_id}, ${tenant[0].id}, ${line.qty}, 'Cancelación de reserva', 'reservation', ${reservationId})`;
       }
       await tx`UPDATE reservations SET status = 'cancelled', cancelled_at = NOW() WHERE id = ${reservationId}`;
       await tx`INSERT INTO service_audit_log (company_id, key_id, action, request_id) VALUES (${tenant[0].id}, ${keyId}, 'reservation.cancel', ${requestId})`;

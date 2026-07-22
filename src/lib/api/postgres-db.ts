@@ -58,6 +58,7 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
+export const CENTRAL_SCHEMA_VERSION = "0009_inventory_audit";
 
 let sql: postgres.Sql;
 
@@ -225,10 +226,12 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS stock_movements (
       id SERIAL PRIMARY KEY,
       product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id) ON DELETE CASCADE,
       delta INTEGER NOT NULL,
       reason TEXT NOT NULL DEFAULT '',
       ref_type TEXT,
       ref_id INTEGER,
+      ref_key TEXT,
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
   `;
@@ -337,6 +340,8 @@ export async function initDb() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS condition_code TEXT NOT NULL DEFAULT 'preowned'`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb`;
+  await sql`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id) ON DELETE CASCADE`;
+  await sql`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS ref_key TEXT`;
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
@@ -366,7 +371,7 @@ export async function initDb() {
     await seedCompaniesPg();
     await seedProductsAndCustomers();
   }
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0008_orders') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES (${CENTRAL_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {

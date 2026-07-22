@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
-import { sql } from "$lib/api/postgres-db";
+import { CENTRAL_SCHEMA_VERSION, sql } from "$lib/api/postgres-db";
 import { centralHealthStatus } from "$lib/api/central-health";
 
 /** Readiness check: never runs migrations or seeds data. */
@@ -10,7 +10,7 @@ export const GET: RequestHandler = async () => {
       SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'schema_migrations') AS table_exists
     `;
     const applied = migrations[0]?.table_exists
-      ? await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0008_orders') AS ready`
+      ? await sql`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = ${CENTRAL_SCHEMA_VERSION}) AS ready`
       : [{ ready: false }];
     const vector = await sql`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS ready`;
     const result = centralHealthStatus({

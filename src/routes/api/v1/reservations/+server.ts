@@ -43,8 +43,11 @@ export const POST: RequestHandler = async ({ request, url }) => {
         const product = byId.get(line.product_id);
         if (!product || product.stock < line.qty) throw new Error("insufficient_stock");
       }
-      for (const line of input.lines!) await tx`UPDATE products SET stock = stock - ${line.qty}, updated_at = NOW() WHERE id = ${line.product_id} AND company_id = ${tenant[0].id}`;
       const reservationId = crypto.randomUUID();
+      for (const line of input.lines!) {
+        await tx`UPDATE products SET stock = stock - ${line.qty}, updated_at = NOW() WHERE id = ${line.product_id} AND company_id = ${tenant[0].id}`;
+        await tx`INSERT INTO stock_movements (product_id, company_id, delta, reason, ref_type, ref_key) VALUES (${line.product_id}, ${tenant[0].id}, ${-line.qty}, 'Reserva de stock', 'reservation', ${reservationId})`;
+      }
       const expiresAt = input.expires_at ?? new Date(Date.now() + 15 * 60_000).toISOString();
       if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) throw new Error("invalid_expiry");
       await tx`INSERT INTO reservations (id, company_id, status, expires_at, external_customer_id) VALUES (${reservationId}, ${tenant[0].id}, 'reserved', ${expiresAt}, ${input.external_customer_id ?? null})`;
