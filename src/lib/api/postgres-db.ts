@@ -318,6 +318,13 @@ export async function initDb() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
+  // Defense in depth for central API roles. Requests set app.company_id locally.
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "external_customer_identities", "semantic_documents", "idempotency_keys", "service_audit_log"] as const) {
+    const policy = `${table}_tenant_isolation`;
+    await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
+    await sql.unsafe(`CREATE POLICY ${policy} ON ${table} USING (company_id = NULLIF(current_setting('app.company_id', true), '')::integer) WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::integer)`);
+  }
   // Partial returns (ciclo 8)
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
@@ -330,7 +337,7 @@ export async function initDb() {
     await seedCompaniesPg();
     await seedProductsAndCustomers();
   }
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0006_central_catalog') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0007_tenant_rls') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {

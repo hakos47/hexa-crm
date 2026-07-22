@@ -2,6 +2,7 @@ import { json, type RequestHandler } from "@sveltejs/kit";
 import { initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
+import { setTenantRls } from "$lib/api/tenant-rls";
 
 const fail = (code: string, status: number, requestId: string) => json({ error: "No se pudo cancelar la reserva", code, request_id: requestId }, { status });
 
@@ -20,6 +21,7 @@ export const DELETE: RequestHandler = async ({ request, params, url }) => {
   if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
   try {
     const response = await sql.begin(async (tx) => {
+      await setTenantRls(tx, tenant[0].id);
       await tx`DELETE FROM service_request_replays WHERE expires_at < NOW()`;
       const replay = await tx`INSERT INTO service_request_replays (key_id, signature, expires_at) VALUES (${keyId}, ${signature}, NOW() + INTERVAL '5 minutes') ON CONFLICT DO NOTHING RETURNING signature`;
       if (!replay.length) throw new Error("replay");

@@ -12,3 +12,5 @@ npm run central:provision-tenant
 ```
 
 El modo central no siembra usuarios ni datos demo. Haz backup/restauración en una instancia no productiva antes de publicar una versión; los secretos y las claves HMAC se rotan fuera del repositorio.
+
+Las tablas comerciales tienen RLS por `company_id`. La API central fija `app.company_id` con `SET LOCAL` dentro de cada transacción; la conexión de producción debe usar un rol no propietario para que PostgreSQL aplique esas políticas.

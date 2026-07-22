@@ -2,6 +2,7 @@ import { json, type RequestHandler } from "@sveltejs/kit";
 import { initDb, sql } from "$lib/api/postgres-db";
 import { findServiceKey, serviceKeysFromEnv } from "$lib/api/service-config";
 import { verifyServiceRequest } from "$lib/api/service-auth";
+import { setTenantRls } from "$lib/api/tenant-rls";
 
 const fail = (code: string, status: number, requestId: string) => json({ error: "No se pudo enlazar el cliente", code, request_id: requestId }, { status });
 
@@ -23,6 +24,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   if (!tenant[0]) return fail("unknown_tenant", 403, requestId);
   try {
     const result = await sql.begin(async (tx) => {
+      await setTenantRls(tx, tenant[0].id);
       await tx`SELECT pg_advisory_xact_lock(hashtext(${`meiga:${tenant[0].id}:${externalUserId}`}))`;
       const known = await tx`SELECT customer_id FROM external_customer_identities WHERE company_id = ${tenant[0].id} AND source = 'meiga' AND external_user_id = ${externalUserId} FOR UPDATE`;
       let customerId = known[0]?.customer_id as number | undefined;
