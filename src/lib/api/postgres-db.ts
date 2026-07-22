@@ -206,6 +206,17 @@ export async function initDb() {
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS external_customer_identities (
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      external_user_id TEXT NOT NULL,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (company_id, source, external_user_id)
+    );
+  `;
 
   await sql`
     CREATE TABLE IF NOT EXISTS sales (
@@ -291,7 +302,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0003_reservations') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0004_external_customers') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {

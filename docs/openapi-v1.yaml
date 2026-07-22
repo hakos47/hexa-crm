@@ -40,6 +40,12 @@ paths:
       responses:
         '200': { description: Reserva cancelada o ya finalizada }
         '404': { description: Reserva no visible para este tenant }
+  /customers:
+    post:
+      summary: Crea o actualiza una ficha comercial desde identidad externa Meiga
+      security: [{ serviceHmac: [] }]
+      responses:
+        '200': { description: Cliente enlazado sin credenciales externas }
 components:
   securitySchemes:
     serviceHmac:
