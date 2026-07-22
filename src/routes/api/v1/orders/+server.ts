@@ -33,12 +33,12 @@ export const POST: RequestHandler = async ({ request, url }) => {
       const reservation = await tx`SELECT id, status, external_customer_id, expires_at FROM reservations WHERE id = ${reservationId} AND company_id = ${tenant[0].id} FOR UPDATE`;
       if (!reservation[0]) throw new Error("reservation_not_found");
       if (reservation[0].status !== "reserved" || new Date(reservation[0].expires_at).getTime() <= Date.now()) throw new Error("reservation_unavailable");
-      const lines = await tx`SELECT l.product_id, l.qty, p.price_cents FROM reservation_lines l JOIN products p ON p.id = l.product_id WHERE l.reservation_id = ${reservationId}`;
+      const lines = await tx`SELECT l.product_id, l.qty, p.price_cents, p.vat_rate FROM reservation_lines l JOIN products p ON p.id = l.product_id WHERE l.reservation_id = ${reservationId}`;
       const total = lines.reduce((sum, line) => sum + line.qty * line.price_cents, 0);
       const orderId = crypto.randomUUID();
       const status = input.status ?? "pending";
       await tx`INSERT INTO orders (id, company_id, reservation_id, external_customer_id, status, total_cents) VALUES (${orderId}, ${tenant[0].id}, ${reservationId}, ${reservation[0].external_customer_id}, ${status}, ${total})`;
-      for (const line of lines) await tx`INSERT INTO order_lines (order_id, product_id, qty, unit_price_cents) VALUES (${orderId}, ${line.product_id}, ${line.qty}, ${line.price_cents})`;
+      for (const line of lines) await tx`INSERT INTO order_lines (order_id, product_id, qty, unit_price_cents, vat_rate) VALUES (${orderId}, ${line.product_id}, ${line.qty}, ${line.price_cents}, ${line.vat_rate})`;
       await tx`UPDATE reservations SET status = 'confirmed' WHERE id = ${reservationId}`;
       const response = { order_id: orderId, reservation_id: reservationId, status, total_cents: total };
       await tx`INSERT INTO idempotency_keys (company_id, operation, key, payload_hash, response) VALUES (${tenant[0].id}, 'order', ${idempotencyKey}, ${payloadHash}, ${JSON.stringify(response)}::jsonb)`;

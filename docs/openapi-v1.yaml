@@ -62,6 +62,15 @@ paths:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       responses:
         '201': { description: Pedido canónico creado }
+  /orders/{id}/sale:
+    post:
+      summary: Registra la venta de un pedido sin volver a descontar la reserva
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Venta canónica creada }
 components:
   securitySchemes:
     serviceHmac:

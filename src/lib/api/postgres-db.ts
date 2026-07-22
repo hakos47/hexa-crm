@@ -58,7 +58,7 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
-export const CENTRAL_SCHEMA_VERSION = "0009_inventory_audit";
+export const CENTRAL_SCHEMA_VERSION = "0010_order_sales";
 
 let sql: postgres.Sql;
 
@@ -218,6 +218,7 @@ export async function initDb() {
       product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
       qty INTEGER NOT NULL CHECK (qty > 0),
       unit_price_cents INTEGER NOT NULL,
+      vat_rate INTEGER NOT NULL DEFAULT 21,
       PRIMARY KEY (order_id, product_id)
     );
   `;
@@ -342,6 +343,8 @@ export async function initDb() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id) ON DELETE CASCADE`;
   await sql`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS ref_key TEXT`;
+  await sql`ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS vat_rate INTEGER NOT NULL DEFAULT 21`;
+  await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_id UUID UNIQUE REFERENCES orders(id) ON DELETE SET NULL`;
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
