@@ -21,8 +21,16 @@ services:
       HEXA_CENTRAL_MODE: "1"
       HEXA_SERVICE_KEYS: ${HEXA_SERVICE_KEYS:-[]}
       HEXA_MIGRATION_TOKEN: ${HEXA_MIGRATION_TOKEN:-}
+      HEXA_OLLAMA_URL: ${HEXA_OLLAMA_URL:-http://ollama:11434}
+      HEXA_EMBEDDING_MODEL: ${HEXA_EMBEDDING_MODEL:-nomic-embed-text}
     depends_on:
       db: { condition: service_healthy }
     ports: ["${HEXA_API_PORT:-3001}:3000"]
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["semantic"]
+    volumes: [hexa_ollama:/root/.ollama]
+    # It deliberately has no host port: API and model stay on the Incus private network.
 volumes:
   hexa_pgdata:
+  hexa_ollama:

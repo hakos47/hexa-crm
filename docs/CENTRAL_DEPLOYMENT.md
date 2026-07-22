@@ -17,3 +17,9 @@ El modo central no siembra usuarios ni datos demo. Haz backup/restauración en u
 Antes de servir tráfico, crea el rol restringido: `npm run central:provision-api-role` con una conexión propietaria y `HEXA_API_DB_USER` / `HEXA_API_DB_PASSWORD`. Configura después `HEXA_API_DATABASE_URL` para que la API use ese rol, no el propietario, y recrea el servicio `api`. Las futuras migraciones se ejecutan temporalmente con conexión propietaria y el mismo endpoint; nunca se exponen al tráfico de tenants.
 
 Las tablas comerciales tienen RLS por `company_id`. La API central fija `app.company_id` con `SET LOCAL` dentro de cada transacción; el rol no propietario hace que PostgreSQL aplique esas políticas.
+
+## Búsqueda semántica opcional
+
+Arranca Ollama sólo en los nodos que vayan a indexar o buscar: `docker compose -f docker-compose.central.yml --profile semantic up -d ollama`. Después descarga el modelo dentro de la red privada: `docker compose -f docker-compose.central.yml exec ollama ollama pull nomic-embed-text`.
+
+La API no depende de este contenedor para su readiness. Si Ollama no responde, indexar o buscar devuelve `semantic_unavailable`/`embedding_unavailable`, sin afectar catálogo, reservas, pedidos o ventas.

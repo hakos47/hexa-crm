@@ -71,6 +71,23 @@ paths:
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
       responses:
         '201': { description: Venta canónica creada }
+  /semantic/documents:
+    post:
+      summary: Indexa un documento comercial permitido con Ollama local
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Documento indexado }
+        '503': { description: Ollama no disponible; CRM sigue operativo }
+  /semantic/search:
+    get:
+      summary: Búsqueda híbrida privada dentro del tenant
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Resultados trazables a su entidad origen }
 components:
   securitySchemes:
     serviceHmac:
