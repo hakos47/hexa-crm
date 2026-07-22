@@ -17,7 +17,10 @@ fn map_cash(row: &rusqlite::Row<'_>) -> rusqlite::Result<CashMovement> {
 }
 
 #[tauri::command]
-pub fn list_cash_movements(db: State<'_, Db>, token: Option<String>) -> Result<Vec<CashMovement>, String> {
+pub fn list_cash_movements(
+    db: State<'_, Db>,
+    token: Option<String>,
+) -> Result<Vec<CashMovement>, String> {
     let conn = db.lock();
     require_session(&conn, &token)?;
     let mut stmt = conn
@@ -35,7 +38,11 @@ pub fn list_cash_movements(db: State<'_, Db>, token: Option<String>) -> Result<V
 }
 
 #[tauri::command]
-pub fn create_cash_movement(db: State<'_, Db>, input: CashInput, token: Option<String>) -> Result<CashMovement, String> {
+pub fn create_cash_movement(
+    db: State<'_, Db>,
+    input: CashInput,
+    token: Option<String>,
+) -> Result<CashMovement, String> {
     let kind = input.kind.as_str();
     if !matches!(kind, "income" | "expense" | "adjustment") {
         return Err("Tipo de movimiento no válido".into());
@@ -45,7 +52,10 @@ pub fn create_cash_movement(db: State<'_, Db>, input: CashInput, token: Option<S
     }
     let conn = db.lock();
     require_session(&conn, &token)?;
-    let occurred = input.occurred_at.filter(|s| !s.is_empty()).unwrap_or_else(now_iso);
+    let occurred = input
+        .occurred_at
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(now_iso);
     let desc = input.description.unwrap_or_default();
     conn.execute(
         "INSERT INTO cash_movements (kind, amount_cents, category, description, sale_id, occurred_at)

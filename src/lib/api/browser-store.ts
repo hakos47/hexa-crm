@@ -8,6 +8,8 @@ import type {
   AuthUser,
   CashInput,
   CashMovement,
+  Company,
+  CompanyMember,
   CreateUserResult,
   Customer,
   CustomerInput,
@@ -22,6 +24,15 @@ import type {
   UserRole,
   VatSummary,
 } from "../types";
+import {
+  billingByCompany,
+  canAccessCompany,
+  companiesForUser,
+  filterByCompanyId,
+  pickDefaultCompanyId,
+  seedCompanies,
+  seedCompanyMembers,
+} from "../company/context";
 import type { VatRate } from "../vat";
 import { isVatRate, splitInclusive } from "../vat";
 import { hashCredential, hashPin, validatePin, verifyCredential } from "../auth/pin";
@@ -32,15 +43,45 @@ import {
   shouldRejectExpiredTemp,
   validatePermanentPassword,
 } from "../auth/password-policy";
+import { countsInBusinessTotals, planCancelSale } from "../sales/cancel-sale";
+import {
+  netSaleTotalCents,
+  planPartialReturn,
+  remainingLineAmounts,
+  type ReturnLineRequest,
+} from "../sales/partial-return";
+import { extractOllamaReply, ollamaChatBody } from "../ai/ollama-reply";
+import {
+  createBackupEnvelope,
+  createPreMigrationBackup,
+  validateBackup,
+  type BackupEnvelope,
+} from "../backup/backup";
 
-const KEY = "nix-c-store-v4";
+const KEY = "hexa-crm-store-v5";
+/** Legacy localStorage keys (pre-rename) — read once, then persist under KEY. */
+const LEGACY_STORE_KEYS = [
+  "nix-c-store-v5",
+  "nix-c-store-v4",
+  "nix-c-store-v3",
+  "nix-c-store-v2",
+  "nix-c-store-v1",
+] as const;
 
 /** In-memory fallback when localStorage is unavailable (tests / SSR). */
 let memoryStore: Store | null = null;
 
 type StoredUser = AuthUser & { pin_hash: string };
 
+type SessionRec = {
+  user_id: number;
+  created_at: string;
+  active_company_id: number | null;
+};
+
 type Store = {
+  companies: Company[];
+  company_members: CompanyMember[];
   products: Product[];
   customers: Customer[];
   sales: Sale[];
@@ -54,7 +95,7 @@ type Store = {
     created_at: string;
   }[];
   users: StoredUser[];
-  sessions: Record<string, { user_id: number; created_at: string }>;
+  sessions: Record<string, SessionRec>;
   settings: Settings;
   seq: {
     product: number;
@@ -64,6 +105,7 @@ type Store = {
     cash: number;
     stock: number;
     user: number;
+    company: number;
   };
 };
 
@@ -109,9 +151,11 @@ async function defaultUsers(t: string): Promise<StoredUser[]> {
 
 function seed(): Store {
   const t = now();
+  const companies = seedCompanies(t);
   const products: Product[] = [
     {
       id: 1,
+      company_id: 1,
       sku: "CAF-001",
       name: "Café de especialidad 250g",
       description: "Tueste medio, origen Colombia",
@@ -127,6 +171,7 @@ function seed(): Store {
     },
     {
       id: 2,
+      company_id: 1,
       sku: "LIB-021",
       name: "Libro de cocina mediterránea",
       description: "Edición tapa blanda",
@@ -142,6 +187,7 @@ function seed(): Store {
     },
     {
       id: 3,
+      company_id: 1,
       sku: "TEC-110",
       name: "Auriculares Bluetooth",
       description: "Cancelación de ruido",
@@ -157,6 +203,7 @@ function seed(): Store {
     },
     {
       id: 4,
+      company_id: 1,
       sku: "ALI-050",
       name: "Miel artesanal 500g",
       description: "Producción local",
@@ -173,10 +220,13 @@ function seed(): Store {
   ];
 
   return {
+    companies,
+    company_members: [],
     products,
     customers: [
       {
         id: 1,
+        company_id: 1,
         name: "Cliente contado",
         email: "",
         phone: "",
@@ -192,7 +242,7 @@ function seed(): Store {
     users: [],
     sessions: {},
     settings: defaultSettings(),
-    seq: { product: 4, customer: 1, sale: 0, line: 0, cash: 0, stock: 0, user: 0 },
+    seq: { product: 4, customer: 1, sale: 0, line: 0, cash: 0, stock: 0, user: 0, company: 2 },
   };
 }
 
@@ -210,11 +260,13 @@ function load(): Store {
     memoryStore.users = memoryStore.users.map(normalizeUser);
     return memoryStore;
   }
-  const raw =
-    localStorage.getItem(KEY) ??
-    localStorage.getItem("nix-c-store-v3") ??
-    localStorage.getItem("nix-c-store-v2") ??
-    localStorage.getItem("nix-c-store-v1");
+  let raw = localStorage.getItem(KEY);
+  if (!raw) {
+    for (const legacy of LEGACY_STORE_KEYS) {
+      raw = localStorage.getItem(legacy);
+      if (raw) break;
+    }
+  }
   if (!raw) {
     const s = seed();
     save(s);
@@ -231,11 +283,31 @@ function load(): Store {
       }));
     }
     if (!parsed.sessions) parsed.sessions = {};
+    if (!parsed.companies) parsed.companies = [];
+    if (!parsed.company_members) parsed.company_members = [];
     if (!parsed.seq) {
-      parsed.seq = { product: 0, customer: 0, sale: 0, line: 0, cash: 0, stock: 0, user: 0 };
+      parsed.seq = {
+        product: 0,
+        customer: 0,
+        sale: 0,
+        line: 0,
+        cash: 0,
+        stock: 0,
+        user: 0,
+        company: 0,
+      };
     }
     if (parsed.seq.user == null) parsed.seq.user = parsed.users.length;
+    if (parsed.seq.company == null) parsed.seq.company = parsed.companies?.length ?? 0;
+    for (const [tok, sess] of Object.entries(parsed.sessions)) {
+      if (sess && (sess as SessionRec).active_company_id === undefined) {
+        (sess as SessionRec).active_company_id = 1;
+      }
+      parsed.sessions[tok] = sess as SessionRec;
+    }
     memoryStore = parsed;
+    // Migrate legacy keys onto the canonical KEY.
+    save(parsed);
     return parsed;
   } catch {
     const s = seed();
@@ -256,10 +328,20 @@ export function __resetBrowserStoreForTests() {
   memoryStore = null;
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(KEY);
-    localStorage.removeItem("nix-c-store-v3");
-    localStorage.removeItem("nix-c-store-v2");
-    localStorage.removeItem("nix-c-store-v1");
+    for (const legacy of LEGACY_STORE_KEYS) {
+      localStorage.removeItem(legacy);
+    }
   }
+}
+
+/** Test helper: current localStorage product key (for rename/compat tests). */
+export function __browserStoreKeyForTests() {
+  return KEY;
+}
+
+/** Test helper: legacy product keys still readable once. */
+export function __legacyBrowserStoreKeysForTests() {
+  return [...LEGACY_STORE_KEYS];
 }
 
 /** Test helper: backdate temp password issuance for a username. */
@@ -279,7 +361,52 @@ async function ensureUsers(s: Store): Promise<Store> {
     s.seq.user = 2;
     save(s);
   }
+  return ensureCompanies(s);
+}
+
+function ensureCompanies(s: Store): Store {
+  const t = now();
+  if (!s.companies?.length) {
+    s.companies = seedCompanies(t);
+    s.seq.company = 2;
+  }
+  if (!s.company_members?.length && s.users.length >= 2) {
+    s.company_members = seedCompanyMembers({
+      adminId: s.users[0].id,
+      cajeroId: s.users[1]?.id ?? s.users[0].id,
+    });
+  } else if (!s.company_members) {
+    s.company_members = [];
+  }
+  // Backfill company_id on legacy rows
+  for (const p of s.products) {
+    if (p.company_id == null) p.company_id = 1;
+  }
+  for (const c of s.customers) {
+    if (c.company_id == null) c.company_id = 1;
+  }
+  for (const sale of s.sales) {
+    if (sale.company_id == null) sale.company_id = 1;
+  }
+  for (const m of s.cash) {
+    if (m.company_id == null) m.company_id = 1;
+  }
+  save(s);
   return s;
+}
+
+function sessionCompanyId(s: Store, token?: string | null): number {
+  auth(s, token);
+  const sess = token ? s.sessions[token] : null;
+  const user = requireSession(s, token);
+  const accessible = companiesForUser(user.id, s.company_members, s.companies);
+  const id = pickDefaultCompanyId(accessible, sess?.active_company_id);
+  if (id == null) throw new Error("Sin empresa asignada al usuario");
+  if (sess && sess.active_company_id !== id) {
+    sess.active_company_id = id;
+    save(s);
+  }
+  return id;
 }
 
 function publicUser(u: StoredUser): AuthUser {
@@ -345,7 +472,7 @@ export const browserApi = {
   /** Public: only shop display name for login screen. No secrets. */
   public_meta(): { shop_name: string } {
     const s = load();
-    return { shop_name: s.settings.shop_name || "Nix-C" };
+    return { shop_name: s.settings.shop_name || "hexa-crm" };
   },
 
   async login(username: string, password: string): Promise<LoginResult> {
@@ -370,13 +497,25 @@ export const browserApi = {
     }
 
     const token = randomToken();
-    s.sessions[token] = { user_id: user.id, created_at: now() };
+    s = ensureCompanies(s);
+    const accessible = companiesForUser(user.id, s.company_members, s.companies);
+    const active_company_id = pickDefaultCompanyId(accessible);
+    s.sessions[token] = {
+      user_id: user.id,
+      created_at: now(),
+      active_company_id,
+    };
     const entries = Object.entries(s.sessions);
     if (entries.length > 20) {
       s.sessions = Object.fromEntries(entries.slice(-20));
     }
     save(s);
-    return { user: publicUser(user), token };
+    return {
+      user: publicUser(user),
+      token,
+      companies: accessible,
+      active_company_id,
+    };
   },
 
   logout(token?: string | null): void {
@@ -394,6 +533,42 @@ export const browserApi = {
     } catch {
       return null;
     }
+  },
+
+  list_companies(token?: string | null): Company[] {
+    const s = load();
+    ensureCompanies(s);
+    const user = auth(s, token);
+    return companiesForUser(user.id, s.company_members, s.companies);
+  },
+
+  get_active_company(token?: string | null): Company | null {
+    const s = load();
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return s.companies.find((c) => c.id === cid) ?? null;
+  },
+
+  set_active_company(company_id: number, token?: string | null): Company {
+    const s = load();
+    ensureCompanies(s);
+    const user = auth(s, token);
+    if (!token || !s.sessions[token]) throw new Error("Sesión no iniciada");
+    if (!canAccessCompany(user.id, company_id, s.company_members)) {
+      throw new Error("No tienes acceso a esa empresa");
+    }
+    s.sessions[token].active_company_id = company_id;
+    save(s);
+    const c = s.companies.find((x) => x.id === company_id);
+    if (!c) throw new Error("Empresa no encontrada");
+    return c;
+  },
+
+  billing_by_company(token?: string | null) {
+    const s = load();
+    ensureCompanies(s);
+    auth(s, token);
+    return billingByCompany(s.sales, s.companies);
   },
 
   async list_users(token?: string | null): Promise<AuthUser[]> {
@@ -474,6 +649,12 @@ export const browserApi = {
       temp_password_issued_at: fields.temp_password_issued_at,
     };
     s.users.push(u);
+    // New users join SHOP; admins also join DEV when present
+    ensureCompanies(s);
+    s.company_members.push({ company_id: 1, user_id: u.id, role });
+    if (role === "admin" && s.companies.some((c) => c.id === 2)) {
+      s.company_members.push({ company_id: 2, user_id: u.id, role: "admin" });
+    }
     save(s);
     return { user: publicUser(u), temporary_password };
   },
@@ -534,25 +715,28 @@ export const browserApi = {
 
   list_products(activeOnly = true, token?: string | null): Product[] {
     const s = load();
-    auth(s, token);
-    return s.products
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return filterByCompanyId(s.products, cid)
       .filter((p) => (activeOnly ? p.active : true))
       .sort((a, b) => a.name.localeCompare(b.name, "es"));
   },
 
   upsert_product(input: ProductInput, token?: string | null): Product {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     const t = now();
     const vat = input.vat_rate;
     if (!isVatRate(vat)) throw new Error("Tipo de IVA no válido");
 
     if (input.id) {
-      const i = s.products.findIndex((p) => p.id === input.id);
+      const i = s.products.findIndex((p) => p.id === input.id && (p.company_id ?? 1) === cid);
       if (i < 0) throw new Error("Producto no encontrado");
       const prev = s.products[i];
       s.products[i] = {
         ...prev,
+        company_id: prev.company_id ?? cid,
         sku: input.sku,
         name: input.name,
         description: input.description ?? "",
@@ -572,6 +756,7 @@ export const browserApi = {
     s.seq.product += 1;
     const p: Product = {
       id: s.seq.product,
+      company_id: cid,
       sku: input.sku,
       name: input.name,
       description: input.description ?? "",
@@ -592,8 +777,9 @@ export const browserApi = {
 
   adjust_stock(productId: number, delta: number, reason: string, token?: string | null): Product {
     const s = load();
-    auth(s, token);
-    const p = s.products.find((x) => x.id === productId);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    const p = s.products.find((x) => x.id === productId && (x.company_id ?? 1) === cid);
     if (!p) throw new Error("Producto no encontrado");
     p.stock += delta;
     p.updated_at = now();
@@ -611,18 +797,23 @@ export const browserApi = {
 
   list_customers(token?: string | null): Customer[] {
     const s = load();
-    auth(s, token);
-    return s.customers.sort((a, b) => a.name.localeCompare(b.name, "es"));
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return filterByCompanyId(s.customers, cid).sort((a, b) =>
+      a.name.localeCompare(b.name, "es"),
+    );
   },
 
   upsert_customer(input: CustomerInput, token?: string | null): Customer {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     if (input.id) {
-      const i = s.customers.findIndex((c) => c.id === input.id);
+      const i = s.customers.findIndex((c) => c.id === input.id && (c.company_id ?? 1) === cid);
       if (i < 0) throw new Error("Cliente no encontrado");
       s.customers[i] = {
         ...s.customers[i],
+        company_id: s.customers[i].company_id ?? cid,
         name: input.name,
         email: input.email ?? "",
         phone: input.phone ?? "",
@@ -635,6 +826,7 @@ export const browserApi = {
     s.seq.customer += 1;
     const c: Customer = {
       id: s.seq.customer,
+      company_id: cid,
       name: input.name,
       email: input.email ?? "",
       phone: input.phone ?? "",
@@ -649,7 +841,8 @@ export const browserApi = {
 
   create_sale(lines: SaleLineInput[], customerId?: number | null, notes?: string, token?: string | null): Sale {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     if (!lines.length) throw new Error("La venta no tiene líneas");
 
     let subtotal = 0;
@@ -658,7 +851,9 @@ export const browserApi = {
     const built: NonNullable<Sale["lines"]> = [];
 
     for (const line of lines) {
-      const product = s.products.find((p) => p.id === line.product_id);
+      const product = s.products.find(
+        (p) => p.id === line.product_id && (p.company_id ?? 1) === cid,
+      );
       if (!product || !product.active) throw new Error("Producto no válido");
       if (product.stock < line.qty) {
         throw new Error(`Stock insuficiente de ${product.name}`);
@@ -677,6 +872,7 @@ export const browserApi = {
         product_id: product.id,
         product_name: product.name,
         qty: line.qty,
+        returned_qty: 0,
         unit_price_cents: unit,
         vat_rate: rate,
         line_base_cents: split.baseCents,
@@ -691,6 +887,7 @@ export const browserApi = {
     const soldAt = now();
     const sale: Sale = {
       id: saleId,
+      company_id: cid,
       customer_id: customerId ?? null,
       customer_name: customerId
         ? s.customers.find((c) => c.id === customerId)?.name ?? null
@@ -700,6 +897,7 @@ export const browserApi = {
       subtotal_cents: subtotal,
       vat_cents: vat,
       total_cents: total,
+      refunded_cents: 0,
       notes: notes ?? "",
       status: "completed",
     };
@@ -726,6 +924,7 @@ export const browserApi = {
     s.seq.cash += 1;
     s.cash.push({
       id: s.seq.cash,
+      company_id: cid,
       kind: "income",
       amount_cents: total,
       category: "ventas",
@@ -740,31 +939,143 @@ export const browserApi = {
 
   list_sales(token?: string | null): Sale[] {
     const s = load();
-    auth(s, token);
-    return [...s.sales].sort((a, b) => b.sold_at.localeCompare(a.sold_at));
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return filterByCompanyId(s.sales, cid).sort((a, b) =>
+      b.sold_at.localeCompare(a.sold_at),
+    );
   },
 
   get_sale(id: number, token?: string | null): Sale {
     const s = load();
-    auth(s, token);
-    const sale = s.sales.find((x) => x.id === id);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    const sale = s.sales.find((x) => x.id === id && (x.company_id ?? 1) === cid);
     if (!sale) throw new Error("Venta no encontrada");
     const lines = s.saleLines.filter((l) => l.sale_id === id);
     return { ...sale, lines };
   },
 
+  cancel_sale(id: number, token?: string | null): Sale {
+    // Full void = return every remaining unit (works after partial returns).
+    const s = load();
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    const sale = s.sales.find((x) => x.id === id && (x.company_id ?? 1) === cid);
+    if (!sale) throw new Error("Venta no encontrada");
+    if (sale.status === "cancelled") throw new Error("La venta ya está anulada");
+    const lines = s.saleLines.filter((l) => l.sale_id === id);
+    const requests: ReturnLineRequest[] = lines
+      .map((l) => ({
+        line_id: l.id,
+        qty: Math.max(0, l.qty - (l.returned_qty ?? 0)),
+      }))
+      .filter((r) => r.qty > 0);
+    if (!requests.length) throw new Error("La venta ya está anulada");
+    // Full void = return all remaining units (same cash/stock path as partial).
+    // planCancelSale remains the pure-rules reference for tests; application is unified here.
+    if (sale.status === "completed" && !(sale.refunded_cents ?? 0)) {
+      planCancelSale(
+        {
+          id: sale.id,
+          number: sale.number,
+          status: sale.status,
+          total_cents: sale.total_cents,
+        },
+        lines.map((l) => ({ product_id: l.product_id, qty: l.qty })),
+      );
+    }
+    return this.return_sale_lines(id, requests, token);
+  },
+
+  return_sale_lines(
+    id: number,
+    requests: ReturnLineRequest[],
+    token?: string | null,
+  ): Sale {
+    const s = load();
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    const sale = s.sales.find((x) => x.id === id && (x.company_id ?? 1) === cid);
+    if (!sale) throw new Error("Venta no encontrada");
+    const lines = s.saleLines.filter((l) => l.sale_id === id);
+    const plan = planPartialReturn(
+      {
+        id: sale.id,
+        number: sale.number,
+        status: sale.status,
+        total_cents: sale.total_cents,
+        refunded_cents: sale.refunded_cents ?? 0,
+      },
+      lines.map((l) => ({
+        id: l.id,
+        product_id: l.product_id,
+        qty: l.qty,
+        returned_qty: l.returned_qty ?? 0,
+        line_total_cents: l.line_total_cents,
+        line_base_cents: l.line_base_cents,
+        line_vat_cents: l.line_vat_cents,
+      })),
+      requests,
+    );
+
+    const t = now();
+    sale.status = plan.new_status;
+    sale.refunded_cents = plan.new_refunded_cents;
+
+    for (const pl of plan.lines) {
+      const line = lines.find((l) => l.id === pl.line_id);
+      if (line) line.returned_qty = pl.new_returned_qty;
+    }
+
+    for (const r of plan.stock_restores) {
+      const p = s.products.find((x) => x.id === r.product_id);
+      if (!p) continue;
+      p.stock += r.qty;
+      p.updated_at = t;
+      s.seq.stock += 1;
+      s.stockMovements.push({
+        id: s.seq.stock,
+        product_id: r.product_id,
+        delta: r.qty,
+        reason: plan.cash_description,
+        created_at: t,
+      });
+    }
+
+    s.seq.cash += 1;
+    s.cash.push({
+      id: s.seq.cash,
+      company_id: cid,
+      kind: "expense",
+      amount_cents: plan.cash_expense_cents,
+      category: plan.cash_category,
+      description: plan.cash_description,
+      sale_id: sale.id,
+      occurred_at: t,
+    });
+
+    save(s);
+    return { ...sale, lines };
+  },
+
   list_cash_movements(token?: string | null): CashMovement[] {
     const s = load();
-    auth(s, token);
-    return [...s.cash].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return filterByCompanyId(s.cash, cid).sort((a, b) =>
+      b.occurred_at.localeCompare(a.occurred_at),
+    );
   },
 
   create_cash_movement(input: CashInput, token?: string | null): CashMovement {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     s.seq.cash += 1;
     const m: CashMovement = {
       id: s.seq.cash,
+      company_id: cid,
       kind: input.kind,
       amount_cents: Math.abs(input.amount_cents),
       category: input.category,
@@ -779,26 +1090,38 @@ export const browserApi = {
 
   get_cash_balance(token?: string | null): number {
     const s = load();
-    auth(s, token);
-    return cashBalance(s);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
+    return cashBalance({ ...s, cash: filterByCompanyId(s.cash, cid) });
   },
 
   vat_summary(from: string, to: string, token?: string | null): VatSummary {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     const bucketsMap = new Map<VatRate, { base: number; vat: number; total: number }>();
     for (const r of [0, 4, 10, 21] as VatRate[]) {
       bucketsMap.set(r, { base: 0, vat: 0, total: 0 });
     }
 
-    for (const sale of s.sales) {
+    for (const sale of filterByCompanyId(s.sales, cid)) {
+      if (!countsInBusinessTotals(sale.status)) continue;
       const d = sale.sold_at.slice(0, 10);
       if (d < from || d > to) continue;
       for (const line of s.saleLines.filter((l) => l.sale_id === sale.id)) {
+        const net = remainingLineAmounts({
+          id: line.id,
+          product_id: line.product_id,
+          qty: line.qty,
+          returned_qty: line.returned_qty ?? 0,
+          line_total_cents: line.line_total_cents,
+          line_base_cents: line.line_base_cents,
+          line_vat_cents: line.line_vat_cents,
+        });
         const b = bucketsMap.get(line.vat_rate)!;
-        b.base += line.line_base_cents;
-        b.vat += line.line_vat_cents;
-        b.total += line.line_total_cents;
+        b.base += net.base_cents;
+        b.vat += net.vat_cents;
+        b.total += net.total_cents;
       }
     }
 
@@ -824,7 +1147,8 @@ export const browserApi = {
 
   dashboard_stats(token?: string | null): DashboardStats {
     const s = load();
-    auth(s, token);
+    ensureCompanies(s);
+    const cid = sessionCompanyId(s, token);
     const today = dayKey(now());
     const month = monthKey(now());
     let sales_today_cents = 0;
@@ -834,16 +1158,38 @@ export const browserApi = {
     let vat_month_cents = 0;
     let base_month_cents = 0;
 
-    for (const sale of s.sales) {
+    for (const sale of filterByCompanyId(s.sales, cid)) {
+      if (!countsInBusinessTotals(sale.status)) continue;
+      const netTotal = netSaleTotalCents({
+        total_cents: sale.total_cents,
+        refunded_cents: sale.refunded_cents ?? 0,
+        status: sale.status,
+      });
+      // Net base/VAT from remaining line quantities
+      let netVat = 0;
+      let netBase = 0;
+      for (const line of s.saleLines.filter((l) => l.sale_id === sale.id)) {
+        const rem = remainingLineAmounts({
+          id: line.id,
+          product_id: line.product_id,
+          qty: line.qty,
+          returned_qty: line.returned_qty ?? 0,
+          line_total_cents: line.line_total_cents,
+          line_base_cents: line.line_base_cents,
+          line_vat_cents: line.line_vat_cents,
+        });
+        netVat += rem.vat_cents;
+        netBase += rem.base_cents;
+      }
       if (dayKey(sale.sold_at) === today) {
-        sales_today_cents += sale.total_cents;
+        sales_today_cents += netTotal;
         sales_today_count += 1;
       }
       if (monthKey(sale.sold_at) === month) {
-        sales_month_cents += sale.total_cents;
+        sales_month_cents += netTotal;
         sales_month_count += 1;
-        vat_month_cents += sale.vat_cents;
-        base_month_cents += sale.subtotal_cents;
+        vat_month_cents += netVat;
+        base_month_cents += netBase;
       }
     }
 
@@ -852,8 +1198,13 @@ export const browserApi = {
       sales_month_cents,
       sales_today_count,
       sales_month_count,
-      cash_balance_cents: cashBalance(s),
-      low_stock: s.products.filter((p) => p.active && p.stock <= p.min_stock),
+      cash_balance_cents: cashBalance({
+        ...s,
+        cash: filterByCompanyId(s.cash, cid),
+      }),
+      low_stock: filterByCompanyId(s.products, cid).filter(
+        (p) => p.active && p.stock <= p.min_stock,
+      ),
       vat_month_cents,
       base_month_cents,
     };
@@ -878,10 +1229,32 @@ export const browserApi = {
     auth(s, token);
     const stats = this.dashboard_stats(token);
     const low = stats.low_stock.map((p) => `${p.name} (${p.stock})`).join(", ") || "ninguno";
+
+    // Yesterday (local) for questions like "¿cuánto ganamos ayer?"
+    const yesterday = (() => {
+      const d = new Date(now());
+      d.setDate(d.getDate() - 1);
+      return dayKey(d.toISOString());
+    })();
+    let sales_yesterday_cents = 0;
+    let sales_yesterday_count = 0;
+    for (const sale of s.sales) {
+      if (!countsInBusinessTotals(sale.status)) continue;
+      if (dayKey(sale.sold_at) === yesterday) {
+        sales_yesterday_cents += sale.total_cents;
+        sales_yesterday_count += 1;
+      }
+    }
+
     const context = {
       tienda: s.settings.shop_name,
+      fecha_hoy: dayKey(now()),
       ventas_hoy_eur: (stats.sales_today_cents / 100).toFixed(2),
+      tickets_hoy: stats.sales_today_count,
+      ventas_ayer_eur: (sales_yesterday_cents / 100).toFixed(2),
+      tickets_ayer: sales_yesterday_count,
       ventas_mes_eur: (stats.sales_month_cents / 100).toFixed(2),
+      tickets_mes: stats.sales_month_count,
       caja_eur: (stats.cash_balance_cents / 100).toFixed(2),
       iva_mes_eur: (stats.vat_month_cents / 100).toFixed(2),
       stock_bajo: low,
@@ -902,26 +1275,42 @@ Contexto actual (JSON compacto): ${JSON.stringify(context)}
 No inventes datos fuera del contexto. Si falta info, dilo.`;
 
     try {
-      const res = await fetch(`${s.settings.ollama_url}/api/chat`, {
+      const baseUrl = s.settings.ollama_url.replace(/\/$/, "");
+      // think:false required for qwen3.5 / reasoning models (empty content otherwise).
+      const res = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: s.settings.ollama_model,
-          stream: false,
-          messages: [{ role: "system", content: system }, ...messages],
-          options: { temperature: 0.4, num_predict: 400 },
-        }),
+        body: JSON.stringify(
+          ollamaChatBody(s.settings.ollama_model, [
+            { role: "system", content: system },
+            ...messages,
+          ]),
+        ),
       });
-      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
-      const data = (await res.json()) as { message?: { content?: string }; model?: string };
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Ollama HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      const data = (await res.json()) as {
+        message?: { content?: string; thinking?: string };
+        model?: string;
+        error?: string;
+      };
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const reply = extractOllamaReply(data.message);
       return {
-        reply: data.message?.content?.trim() || "Sin respuesta del modelo.",
+        reply,
         model: data.model || s.settings.ollama_model,
       };
-    } catch {
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      const offline = /fetch|network|Failed to fetch|ECONNREFUSED|connect/i.test(detail);
       return {
-        reply:
-          "No puedo conectar con Ollama. Comprueba que `ollama serve` está activo y el modelo está instalado. La app sigue funcionando sin IA.",
+        reply: offline
+          ? "No puedo conectar con Ollama. Comprueba que `ollama serve` está activo y el modelo está instalado. La app sigue funcionando sin IA."
+          : `Error de Ollama: ${detail}`,
         model: s.settings.ollama_model,
         offline: true,
       };
@@ -948,5 +1337,36 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     fresh.users = users;
     fresh.seq.user = 2;
     save(fresh);
+  },
+
+  /** Full store export (admin). Versioned + checksum — see docs/BACKUP.md */
+  async export_backup(token?: string | null): Promise<BackupEnvelope> {
+    const s = load();
+    requireAdmin(s, token);
+    // Strip session tokens from backup for safer transport
+    const { sessions: _s, ...rest } = s;
+    return createBackupEnvelope({ ...rest, sessions: {} });
+  },
+
+  /** Validate and restore store from envelope (admin). Rejects corrupt copies. */
+  async restore_backup(raw: unknown, token?: string | null): Promise<void> {
+    const s = load();
+    requireAdmin(s, token);
+    const v = await validateBackup(raw);
+    if (!v.ok) throw new Error(v.error);
+    const payload = v.envelope.payload as Store;
+    if (!payload || !Array.isArray(payload.products) || !Array.isArray(payload.users)) {
+      throw new Error("Copia inválida: estructura de tienda incompleta.");
+    }
+    // Keep current sessions empty after restore — force re-login
+    save({ ...payload, sessions: {} });
+  },
+
+  /** Snapshot before schema/migration-like operations (admin). */
+  async pre_migration_backup(reason: string, token?: string | null): Promise<BackupEnvelope> {
+    const s = load();
+    requireAdmin(s, token);
+    const { sessions: _s, ...rest } = s;
+    return createPreMigrationBackup({ ...rest, sessions: {} }, reason);
   },
 };

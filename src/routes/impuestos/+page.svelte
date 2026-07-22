@@ -77,7 +77,7 @@
   <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
     <KpiCard label="Base imponible" value={formatEUR(summary.base_cents)} accent="cyan" />
     <KpiCard label="Cuota IVA" value={formatEUR(summary.vat_cents)} accent="amber" />
-    <KpiCard label="Total facturado" value={formatEUR(summary.total_cents)} accent="emerald" />
+    <KpiCard label="Total ventas (interno)" value={formatEUR(summary.total_cents)} accent="emerald" />
   </div>
 
   <Card lift={false} class="overflow-hidden p-0">

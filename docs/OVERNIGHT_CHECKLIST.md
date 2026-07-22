@@ -1,4 +1,4 @@
-# Overnight audit checklist — Nix-C CRM
+# Overnight audit checklist — hexa-crm CRM
 
 Pase de orquestación completado (checklist finita + cycle de enhancement).
 

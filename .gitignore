@@ -11,3 +11,11 @@ src-tauri/target
 dist
 *.db
 .DS_Store
+
+# Keep continuous-improvement memory tracked under .grok/
+# (do not ignore .grok/continuous-improvement)
+scripts/create-master-user.js
+
+# MCP package
+tools/mcp/node_modules/
+tools/mcp/dist/

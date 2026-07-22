@@ -34,9 +34,7 @@ pub fn list_products(
     require_session(&conn, &token)?;
     let only = active_only.unwrap_or(true);
     let sql = if only {
-        format!(
-            "SELECT {PRODUCT_COLS} FROM products WHERE active = 1 ORDER BY name COLLATE NOCASE"
-        )
+        format!("SELECT {PRODUCT_COLS} FROM products WHERE active = 1 ORDER BY name COLLATE NOCASE")
     } else {
         format!("SELECT {PRODUCT_COLS} FROM products ORDER BY name COLLATE NOCASE")
     };

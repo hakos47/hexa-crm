@@ -62,6 +62,12 @@ pub struct SaleLineInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReturnLineInput {
+    pub line_id: i64,
+    pub qty: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaleLine {
     pub id: i64,
     pub sale_id: i64,
@@ -73,6 +79,8 @@ pub struct SaleLine {
     pub line_base_cents: i64,
     pub line_vat_cents: i64,
     pub line_total_cents: i64,
+    #[serde(default)]
+    pub returned_qty: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +95,8 @@ pub struct Sale {
     pub total_cents: i64,
     pub notes: String,
     pub status: String,
+    #[serde(default)]
+    pub refunded_cents: i64,
     pub lines: Option<Vec<SaleLine>>,
 }
 

@@ -1,7 +1,7 @@
-# AGENTS.md — Hexa CRM (nix-c / hexa-crm)
+# AGENTS.md — hexa-crm
 
 Instrucciones **persistentes** para cualquier agente o desarrollador en este repo.  
-Remoto: `git@github.com:hakos47/hexa-crm.git` · Producto: **Nix-C** (CRM de tienda local).
+Remoto: `git@github.com:HEXA-NIX/hexa-crm.git` · Producto: **hexa-crm** (CRM de tienda local).
 
 ---
 
@@ -13,9 +13,19 @@ Modelo: **trunk-based + canales por tags/CI** (no ramas eternas tipo nightly/pro
 
 | Rama | Rol |
 |------|-----|
-| **`main`** | Única rama estable de integración. Siempre CI verde. Fuente de nightlies y de releases. |
+| **`main`** | Producción / release. Solo avanza cuando el **humano** decide mergear desde `dev` (o un release). Protegida: no commits/push directos. |
+| **`dev`** | Integración del equipo de desarrollo (director de dev). Aquí aterrizan los `feat/*` ya testeados. Listo para review humana → `main`. |
 
-**No crear** por defecto: `develop`, `nightly`, `staging`, `prod` como ramas permanentes.
+**No crear** por defecto: `nightly`, `staging`, `prod` como ramas eternas adicionales.
+
+### Flujo de entrega (director de dev → humano)
+
+```
+feat/*  →  PR/merge a dev  →  tests+build verdes  →  [humano] decide merge dev → main
+```
+
+El director de dev puede mergear a **`dev`** y pushear `origin/dev`.  
+**No** mergear a `main` sin autorización explícita del responsable del producto.
 
 ### Corta vida (siempre desde `main`)
 
@@ -35,6 +45,19 @@ Modelo: **trunk-based + canales por tags/CI** (no ramas eternas tipo nightly/pro
 3. PR → `main` (preferir **squash merge**)
 4. CI debe pasar (test + build) antes de merge
 5. **No force-push** a `main`
+
+### Releases y documentación de cambios (obligatorio)
+
+Desde **0.2.0**, **todo cambio que vaya a una release debe documentarse**:
+
+| Artefacto | Uso |
+|-----------|-----|
+| [`CHANGELOG.md`](./CHANGELOG.md) | Historial Keep a Changelog; sección `[Unreleased]` al cerrar cada feature |
+| [`docs/RELEASES.md`](./docs/RELEASES.md) | Checklist de versión, tag, GitHub Release y deploy Incus |
+| `package.json` / Tauri / Cargo `version` | Siempre alineados entre sí |
+
+No publicar tag/Release sin entrada de CHANGELOG para esa versión.  
+Despliegue Incus (`voura:nix-c-web` / `nix-c-srv`): ver `docs/RELEASES.md`.
 
 ### Canales de entrega (≠ ramas eternas)
 
@@ -96,7 +119,7 @@ ALLOW_MAIN_PUSH=1 git push origin main
 ## Estructura de carpetas del proyecto
 
 ```
-hexa-crm / nix-c/
+hexa-crm/
 ├── AGENTS.md                 # Este archivo (convenciones para agentes)
 ├── README.md                 # Documentación de usuario/dev
 ├── package.json              # Scripts: dev, build, test, tauri

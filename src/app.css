@@ -15,8 +15,9 @@
   --color-border-strong: rgba(192, 132, 252, 0.28);
 
   --color-text: #f3eefc;
-  --color-muted: #9b92b0;
-  --color-muted-dim: #6b647c;
+  /* Muted raised for WCAG AA on obsidian (~4.5:1+); keep in sync with a11y/contrast.ts */
+  --color-muted: #c4b8d9;
+  --color-muted-dim: #9a90b0;
 
   --color-purple: #c084fc;
   --color-purple-bright: #e9d5ff;

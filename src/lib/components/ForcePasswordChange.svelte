@@ -77,8 +77,15 @@
       <Button type="submit" class="w-full" disabled={loading}>
         {loading ? "Guardando…" : "Guardar y continuar"}
       </Button>
-      <Button type="button" variant="ghost" class="w-full" onclick={() => clearSession()}>
-        Cancelar e ir al login
+      <Button
+        type="button"
+        variant="ghost"
+        class="w-full"
+        data-logout
+        aria-label="Cerrar sesión"
+        onclick={() => clearSession()}
+      >
+        Cerrar sesión
       </Button>
     </form>
   </div>

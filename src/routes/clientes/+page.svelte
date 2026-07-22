@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { page } from "$app/stores";
   import { api } from "$lib/api/client";
   import type { Customer } from "$lib/types";
   import Button from "$lib/components/Button.svelte";
@@ -40,7 +41,12 @@
     }
   }
 
-  onMount(load);
+  onMount(async () => {
+    await load();
+    if ($page.url.searchParams.get("nuevo") === "1") {
+      openCreate();
+    }
+  });
 
   function openCreate() {
     editing = null;

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" fill="none" role="img" aria-label="Nix-C">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" fill="none" role="img" aria-label="hexa-crm">
   <defs>
     <linearGradient id="nc-bg" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse">
       <stop stop-color="#1a1028"/>
@@ -35,8 +35,8 @@
     y="40"
     fill="url(#nc-word)"
     font-family="Inter, system-ui, -apple-system, sans-serif"
-    font-size="28"
+    font-size="22"
     font-weight="650"
-    letter-spacing="0.04em"
-  >Nix-C</text>
+    letter-spacing="0.02em"
+  >hexa-crm</text>
 </svg>
