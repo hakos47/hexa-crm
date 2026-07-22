@@ -40,6 +40,14 @@ paths:
       responses:
         '200': { description: Reserva cancelada o ya finalizada }
         '404': { description: Reserva no visible para este tenant }
+  /reservations/expire:
+    post:
+      summary: Expira las reservas vencidas del tenant y libera el stock una única vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Lote de reservas expiradas }
   /customers:
     post:
       summary: Crea o actualiza una ficha comercial desde identidad externa Meiga
