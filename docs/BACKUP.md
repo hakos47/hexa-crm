@@ -37,11 +37,12 @@ Evitar pérdida de datos de negocio por fallo local, migración o error humano.
 |---------|-------------------|
 | Browser `localStorage` | Envelope JSON (implementado + tests) |
 | SQLite desktop | Copiar archivo DB + integrity_check (Rust, futuro comando) |
-| Postgres Docker | `pg_dump` / restore (ops; documentado) |
+| Postgres central | `central:verify-backup` restaura un dump en una BD temporal (implementado) |
 
 ```bash
-# Postgres (contenedor nix-c-postgres)
-docker exec nix-c-postgres pg_dump -U hakos nix_crm > backup-$(date +%F).sql
+# Postgres central: comprobar un backup y restore sin tocar producción
+POSTGRES_PASSWORD='…' CENTRAL_COMPOSE_PROJECT=hexa-central \
+  npm run central:verify-backup
 ```
 
 ## Pruebas

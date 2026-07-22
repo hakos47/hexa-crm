@@ -12,7 +12,14 @@ HEXA_TENANT_LEGAL_NAME='Meiga S.L.' HEXA_TENANT_TRADE_NAME='Meiga' \
 npm run central:provision-tenant
 ```
 
-El modo central no siembra usuarios ni datos demo. Haz backup/restauración en una instancia no productiva antes de publicar una versión; los secretos y las claves HMAC se rotan fuera del repositorio.
+El modo central no siembra usuarios ni datos demo. Antes de publicar una versión, ejecuta el gate de backup/restauración contra una instancia no productiva ya migrada:
+
+```bash
+POSTGRES_PASSWORD='…' CENTRAL_COMPOSE_PROJECT=hexa-central \
+  npm run central:verify-backup
+```
+
+El comando crea una base temporal, restaura un `pg_dump` en streaming, exige el último esquema y `pgvector`, y elimina la base temporal. Nunca restaura sobre `hexa_crm`. Los secretos y las claves HMAC se rotan fuera del repositorio.
 
 Antes de servir tráfico, crea el rol restringido: `npm run central:provision-api-role` con una conexión propietaria y `HEXA_API_DB_USER` / `HEXA_API_DB_PASSWORD`. Configura después `HEXA_API_DATABASE_URL` para que la API use ese rol, no el propietario, y recrea el servicio `api`. Las futuras migraciones se ejecutan temporalmente con conexión propietaria y el mismo endpoint; nunca se exponen al tráfico de tenants.
 

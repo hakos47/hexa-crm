@@ -43,6 +43,7 @@
     "mcp:dev": "npm run dev --prefix tools/mcp",
     "central:provision-tenant": "node scripts/provision-central-tenant.mjs",
     "central:provision-api-role": "node scripts/provision-central-api-role.mjs",
+    "central:verify-backup": "bash scripts/verify-central-backup-restore.sh",
     "central:provision-operator": "node scripts/provision-central-operator.mjs"
   },
   "dependencies": {
