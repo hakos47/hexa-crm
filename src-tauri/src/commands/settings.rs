@@ -34,6 +34,11 @@ pub fn settings_from_conn(conn: &rusqlite::Connection) -> Settings {
         ollama_model: get_setting(conn, "ollama_model", "qwen3.5:4b"),
         ollama_url: get_setting(conn, "ollama_url", "http://127.0.0.1:11434"),
         default_vat,
+        idle_timeout_minutes: get_setting(conn, "idle_timeout_minutes", "15")
+            .parse::<i32>()
+            .ok()
+            .filter(|v| (0..=480).contains(v))
+            .unwrap_or(15),
     }
 }
 
@@ -85,6 +90,16 @@ pub fn update_settings(
                 "21".into()
             };
             set_setting(&conn, "default_vat", &n)?;
+        }
+        if let Some(v) = partial.get("idle_timeout_minutes") {
+            let minutes = v
+                .as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+                .filter(|n| (0..=480).contains(n))
+                .ok_or_else(|| {
+                    "El bloqueo automático debe estar entre 0 y 480 minutos".to_string()
+                })?;
+            set_setting(&conn, "idle_timeout_minutes", &minutes.to_string())?;
         }
     }
     get_settings(db, token)

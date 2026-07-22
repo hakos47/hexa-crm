@@ -17,7 +17,10 @@
     markSessionReady,
     mustChangePassword,
     activeCompany,
+    idleTimeoutMinutes,
+    setIdleTimeoutMinutes,
   } from "$lib/stores/session";
+  import { idleTimeoutMs } from "$lib/auth/idle-timeout";
   import { api } from "$lib/api/client";
   import { page } from "$app/stores";
   import { showToast } from "$lib/stores/ui";
@@ -30,6 +33,7 @@
   let showOnboarding = $state(false);
   // El chat (y marked) no forma parte del camino login → TPV.
   let AiDrawer = $state<Component | null>(null);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const titles: Record<string, { title: string; subtitle: string }> = {
     "/": {
@@ -96,6 +100,12 @@
           /* company API optional on older backends */
         }
         setSession(me, token, { companies, activeCompanyId });
+        try {
+          const settings = await api.getSettings();
+          setIdleTimeoutMinutes(settings.idle_timeout_minutes);
+        } catch {
+          // Older backends keep the safe 15-minute default.
+        }
       } else {
         clearSession();
       }
@@ -104,6 +114,43 @@
     } finally {
       markSessionReady();
     }
+  });
+
+  function clearIdleTimer() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+
+  function lockAfterIdle() {
+    clearIdleTimer();
+    void api.logout().catch(() => {
+      /* local lock still wins if the backend is unavailable */
+    });
+    clearSession();
+    showToast("Sesión bloqueada por inactividad. Vuelve a iniciar sesión.", "info");
+  }
+
+  function noteActivity() {
+    clearIdleTimer();
+    if (!canEnter) return;
+    const timeout = idleTimeoutMs($idleTimeoutMinutes);
+    if (timeout !== null) idleTimer = setTimeout(lockAfterIdle, timeout);
+  }
+
+  onMount(() => {
+    const events = ["pointerdown", "keydown", "touchstart", "scroll"] as const;
+    events.forEach((event) => window.addEventListener(event, noteActivity, { passive: true }));
+    noteActivity();
+    return () => {
+      clearIdleTimer();
+      events.forEach((event) => window.removeEventListener(event, noteActivity));
+    };
+  });
+
+  $effect(() => {
+    void canEnter;
+    void $idleTimeoutMinutes;
+    noteActivity();
   });
 
   // First-run wizard when session becomes valid (issue #11)

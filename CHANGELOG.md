@@ -16,6 +16,7 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - Tauri/SQLite: `return_sale_lines` con migración de devoluciones parciales, stock y caja netos (#24).
 - Documentado el contrato de paridad RPC/Tauri para ventas y devoluciones (#24).
 - Carga diferida de `AiDrawer` y `marked`: el shell no descarga IA antes de abrirla (#20).
+- Bloqueo de sesión por inactividad configurable (15 min por defecto; 0 lo desactiva) y ajustes restringidos por rol (#21).
 
 ### Changed
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).

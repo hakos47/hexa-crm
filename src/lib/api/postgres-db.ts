@@ -315,6 +315,7 @@ async function seedSettings() {
     { key: "ollama_model", value: "qwen3.5:4b" },
     { key: "ollama_url", value: "http://127.0.0.1:11434" },
     { key: "default_vat", value: "21" },
+    { key: "idle_timeout_minutes", value: "15" },
   ];
   for (const { key, value } of defaults) {
     await sql`
@@ -1366,13 +1367,31 @@ export const postgresApi = {
         const n = Number(settingsMap.get("default_vat") || "21");
         return isVatRate(n) ? n : 21;
       })(),
+      idle_timeout_minutes: (() => {
+        const n = Number(settingsMap.get("idle_timeout_minutes") || "15");
+        return Number.isInteger(n) && n >= 0 && n <= 480 ? n : 15;
+      })(),
     };
   },
 
   async update_settings(partial: Partial<Settings>, token: string | null): Promise<Settings> {
-    await requireSession(token);
-    for (const [key, value] of Object.entries(partial)) {
+    await requireAdmin(token);
+    const allowed: (keyof Settings)[] = [
+      "shop_name",
+      "ollama_model",
+      "ollama_url",
+      "default_vat",
+      "idle_timeout_minutes",
+    ];
+    for (const key of allowed) {
+      const value = partial[key];
       if (value !== undefined) {
+        if (
+          key === "idle_timeout_minutes" &&
+          (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 480)
+        ) {
+          throw new Error("El bloqueo automático debe estar entre 0 y 480 minutos");
+        }
         await sql`
           INSERT INTO settings (key, value)
           VALUES (${key}, ${value.toString()})

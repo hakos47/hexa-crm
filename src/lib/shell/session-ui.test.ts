@@ -28,6 +28,12 @@ describe("session logout UI (#9)", () => {
     expect(sidebar).toContain("data-logout");
     expect(sidebar).toContain("onLogout");
   });
+
+  it("resets and enforces the configured inactivity lock", () => {
+    expect(layout).toContain("idleTimeoutMinutes");
+    expect(layout).toContain("lockAfterIdle");
+    expect(layout).toMatch(/pointerdown.*keydown.*touchstart.*scroll/s);
+  });
 });
 
 describe("shell Spanish commerce copy (#12)", () => {

@@ -156,6 +156,7 @@ pub struct Settings {
     pub ollama_model: String,
     pub ollama_url: String,
     pub default_vat: i32,
+    pub idle_timeout_minutes: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

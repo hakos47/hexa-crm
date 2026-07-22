@@ -42,8 +42,8 @@ export const AJUSTES_SECTIONS: readonly AjustesSectionDef[] = [
     id: "tienda",
     label: "Tienda",
     title: "Comercio",
-    hint: "Nombre visible en login y asistente, e IVA por defecto en ventas.",
-    adminOnly: false,
+    hint: "Nombre visible en login y asistente, e IVA por defecto en ventas. Solo administradores.",
+    adminOnly: true,
     hasSave: true,
   },
   {
@@ -57,8 +57,8 @@ export const AJUSTES_SECTIONS: readonly AjustesSectionDef[] = [
     id: "ia",
     label: "Asistente IA",
     title: "Ollama",
-    hint: "URL y modelo del asistente local. Guarda desde Tienda si cambias la URL o el modelo.",
-    adminOnly: false,
+    hint: "URL y modelo del asistente local. Solo administradores.",
+    adminOnly: true,
     hasSave: true,
   },
   {

@@ -10,7 +10,13 @@
   import Modal from "$lib/components/Modal.svelte";
   import Select from "$lib/components/Select.svelte";
   import { showToast } from "$lib/stores/ui";
-  import { currentUser, isAdmin, clearSession } from "$lib/stores/session";
+  import {
+    currentUser,
+    isAdmin,
+    clearSession,
+    setIdleTimeoutMinutes,
+  } from "$lib/stores/session";
+  import { normalizeIdleTimeoutMinutes } from "$lib/auth/idle-timeout";
   import { TEMP_PASSWORD_LENGTH } from "$lib/auth/password-policy";
   import {
     applyGitHubUpdate,
@@ -78,6 +84,7 @@
     try {
       settings = await api.getSettings();
       defaultVatStr = String(settings.default_vat);
+      setIdleTimeoutMinutes(settings.idle_timeout_minutes);
       health = await api.ollamaHealth();
       if ($isAdmin) {
         users = await api.listUsers();
@@ -112,6 +119,7 @@
     try {
       settings.default_vat = Number(defaultVatStr) as VatRate;
       settings = await api.updateSettings(settings);
+      setIdleTimeoutMinutes(settings.idle_timeout_minutes);
       showToast("Ajustes guardados");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
@@ -413,6 +421,34 @@
                 <Button type="submit" variant="secondary">Actualizar contraseña</Button>
               </div>
             </form>
+
+            {#if $isAdmin}
+              <div class="mt-6 border-t border-[var(--color-border)] pt-5">
+                <p class="section-label mb-1">Mostrador compartido</p>
+                <h3 class="text-sm font-semibold text-[var(--color-text)]">Bloqueo por inactividad</h3>
+                <p class="mt-1 text-xs text-[var(--color-muted)]">
+                  Tras este tiempo se cierra la sesión en pantalla. Usa 0 para desactivarlo.
+                </p>
+                <div class="mt-3 flex flex-wrap items-end gap-2">
+                  <label class="flex w-40 flex-col gap-1.5 text-sm">
+                    <span class="font-medium text-[var(--color-muted)]">Minutos (0–480)</span>
+                    <input
+                      class="field w-full"
+                      type="number"
+                      min="0"
+                      max="480"
+                      value={settings.idle_timeout_minutes}
+                      oninput={(event) => {
+                        settings!.idle_timeout_minutes = normalizeIdleTimeoutMinutes(
+                          Number((event.currentTarget as HTMLInputElement).value),
+                        );
+                      }}
+                    />
+                  </label>
+                  <Button onclick={save}>Guardar bloqueo</Button>
+                </div>
+              </div>
+            {/if}
           </div>
         </Card>
       {:else if activeSection === "tienda"}

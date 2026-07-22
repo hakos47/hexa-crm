@@ -46,17 +46,20 @@ describe("AJUSTES_SECTIONS catalog", () => {
     expect(sectionById("tienda").hasSave).toBe(true);
   });
 
-  it("hides equipo for non-admin and keeps it for admin", () => {
+  it("hides privileged settings for cashiers and keeps them for admins", () => {
     const cajero = visibleAjustesSections(false).map((s) => s.id);
     const admin = visibleAjustesSections(true).map((s) => s.id);
     expect(cajero).not.toContain("equipo");
+    expect(cajero).not.toContain("tienda");
+    expect(cajero).not.toContain("ia");
     expect(admin).toContain("equipo");
     expect(cajero).toContain("cuenta");
-    expect(cajero).toContain("tienda");
+    expect(admin).toContain("tienda");
+    expect(admin).toContain("ia");
   });
 
   it("resolveActiveSection falls back when requested is hidden or invalid", () => {
-    expect(resolveActiveSection("equipo", false)).toBe(DEFAULT_AJUSTES_SECTION);
+    expect(resolveActiveSection("equipo", false)).toBe("cuenta");
     expect(resolveActiveSection("nope", true)).toBe(DEFAULT_AJUSTES_SECTION);
     expect(resolveActiveSection("ia", true)).toBe("ia");
     expect(resolveActiveSection("equipo", true)).toBe("equipo");

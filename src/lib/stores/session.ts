@@ -1,5 +1,9 @@
 import { writable, derived, get } from "svelte/store";
 import type { AuthUser, Company } from "$lib/types";
+import {
+  DEFAULT_IDLE_TIMEOUT_MINUTES,
+  normalizeIdleTimeoutMinutes,
+} from "$lib/auth/idle-timeout";
 
 const SESSION_KEY = "hexa-crm-session-v1";
 const LEGACY_SESSION_KEY = "nix-c-session-v1";
@@ -50,6 +54,7 @@ export const session = writable<SessionState>({
 export const currentUser = derived(session, ($s) => $s.user);
 export const isAuthenticated = derived(session, ($s) => !!$s.user && !!$s.token);
 export const isAdmin = derived(session, ($s) => $s.user?.role === "admin");
+export const idleTimeoutMinutes = writable(DEFAULT_IDLE_TIMEOUT_MINUTES);
 export const activeCompany = derived(session, ($s) =>
   $s.companies.find((c) => c.id === $s.activeCompanyId) ?? null,
 );
@@ -104,6 +109,10 @@ export function clearSession() {
 
 export function markSessionReady() {
   session.update((s) => ({ ...s, ready: true }));
+}
+
+export function setIdleTimeoutMinutes(minutes: unknown) {
+  idleTimeoutMinutes.set(normalizeIdleTimeoutMinutes(minutes));
 }
 
 export function getToken(): string | null {

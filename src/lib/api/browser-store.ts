@@ -119,6 +119,7 @@ function defaultSettings(): Settings {
     ollama_model: "qwen3.5:4b",
     ollama_url: "http://127.0.0.1:11434",
     default_vat: 21,
+    idle_timeout_minutes: 15,
   };
 }
 

@@ -172,6 +172,8 @@ export type Settings = {
   ollama_model: string;
   ollama_url: string;
   default_vat: VatRate;
+  /** Minutes without interaction before locking; 0 disables auto-lock. */
+  idle_timeout_minutes: number;
 };
 
 export type AiMessage = {
