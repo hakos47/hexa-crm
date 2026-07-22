@@ -15,6 +15,7 @@ paths:
   /products:
     get:
       summary: Feed paginado de catálogo publicado
+      security: [{ serviceHmac: [] }]
       parameters:
         - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, maximum: 100 } }
