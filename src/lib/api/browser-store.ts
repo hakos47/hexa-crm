@@ -120,6 +120,7 @@ function defaultSettings(): Settings {
     ollama_url: "http://127.0.0.1:11434",
     default_vat: 21,
     idle_timeout_minutes: 15,
+    last_backup_at: null,
   };
 }
 
@@ -1346,7 +1347,10 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     requireAdmin(s, token);
     // Strip session tokens from backup for safer transport
     const { sessions: _s, ...rest } = s;
-    return createBackupEnvelope({ ...rest, sessions: {} });
+    const backup = await createBackupEnvelope({ ...rest, sessions: {} });
+    s.settings.last_backup_at = backup.created_at;
+    save(s);
+    return backup;
   },
 
   /** Validate and restore store from envelope (admin). Rejects corrupt copies. */

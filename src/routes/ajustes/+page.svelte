@@ -17,6 +17,7 @@
     setIdleTimeoutMinutes,
   } from "$lib/stores/session";
   import { normalizeIdleTimeoutMinutes } from "$lib/auth/idle-timeout";
+  import { parseBackupJson, type BackupEnvelope } from "$lib/backup/backup";
   import { TEMP_PASSWORD_LENGTH } from "$lib/auth/password-policy";
   import {
     applyGitHubUpdate,
@@ -58,6 +59,8 @@
 
   let createdTempPassword = $state<string | null>(null);
   let tempModal = $state(false);
+  let restorePreview = $state<BackupEnvelope | null>(null);
+  let restoreBusy = $state(false);
 
   let pinForm = $state({ current: "", next: "", confirm: "" });
 
@@ -151,9 +154,43 @@
       a.download = `hexa-crm-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+      settings = await api.getSettings();
       showToast("Copia de seguridad descargada");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error al exportar", "err");
+    }
+  }
+
+  async function inspectBackupFile(event: Event) {
+    const file = (event.currentTarget as HTMLInputElement).files?.[0];
+    restorePreview = null;
+    if (!file) return;
+    try {
+      const validation = await parseBackupJson(await file.text());
+      if (!validation.ok) {
+        showToast(validation.error, "err");
+        return;
+      }
+      restorePreview = validation.envelope;
+    } catch {
+      showToast("No se pudo leer la copia. Elige un JSON válido.", "err");
+    }
+  }
+
+  async function restoreBackup() {
+    if (!restorePreview) return;
+    if (!confirm("Se sustituirán los datos locales por esta copia y se cerrará la sesión. ¿Continuar?")) {
+      return;
+    }
+    restoreBusy = true;
+    try {
+      await api.restoreBackup(restorePreview);
+      clearSession();
+      showToast("Copia restaurada. Inicia sesión de nuevo.");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "No se pudo restaurar la copia", "err");
+    } finally {
+      restoreBusy = false;
     }
   }
 
@@ -703,8 +740,35 @@
                 <Button variant="secondary" onclick={exportBackup}>Exportar copia</Button>
               </div>
               <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
-                Descarga un JSON con los datos de la instancia (browser o API).
+                {#if settings.last_backup_at}
+                  Última copia: {new Date(settings.last_backup_at).toLocaleString("es-ES")}.
+                {:else}
+                  Aún no hay una copia registrada. Descarga un JSON con los datos de la instancia.
+                {/if}
               </p>
+              {#if !api.isTauri()}
+                <div class="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <p class="text-sm font-medium text-[var(--color-text)]">Restaurar una copia</p>
+                  <p class="mt-1 text-xs text-[var(--color-muted)]">
+                    Primero comprobamos el checksum y te mostramos la fecha; nada se restaura al seleccionar el archivo.
+                  </p>
+                  <input
+                    class="mt-3 block w-full text-xs text-[var(--color-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-purple-500/15 file:px-3 file:py-2 file:text-xs file:font-medium file:text-[var(--color-purple-bright)]"
+                    type="file"
+                    accept="application/json,.json"
+                    onchange={inspectBackupFile}
+                  />
+                  {#if restorePreview}
+                    <div class="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+                      <p class="font-medium">Copia válida · {new Date(restorePreview.created_at).toLocaleString("es-ES")}</p>
+                      <p class="mt-1 break-all text-amber-100/70">Checksum: {restorePreview.checksum}</p>
+                      <Button class="mt-3" variant="danger" onclick={restoreBackup} disabled={restoreBusy}>
+                        {restoreBusy ? "Restaurando…" : "Confirmar restauración"}
+                      </Button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             {:else}
               <p class="text-sm text-[var(--color-muted)]">
                 Las copias de seguridad las gestiona un administrador.

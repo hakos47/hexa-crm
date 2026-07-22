@@ -316,6 +316,7 @@ async function seedSettings() {
     { key: "ollama_url", value: "http://127.0.0.1:11434" },
     { key: "default_vat", value: "21" },
     { key: "idle_timeout_minutes", value: "15" },
+    { key: "last_backup_at", value: "" },
   ];
   for (const { key, value } of defaults) {
     await sql`
@@ -1371,6 +1372,7 @@ export const postgresApi = {
         const n = Number(settingsMap.get("idle_timeout_minutes") || "15");
         return Number.isInteger(n) && n >= 0 && n <= 480 ? n : 15;
       })(),
+      last_backup_at: settingsMap.get("last_backup_at") || null,
     };
   },
 
@@ -1382,6 +1384,7 @@ export const postgresApi = {
       "ollama_url",
       "default_vat",
       "idle_timeout_minutes",
+      "last_backup_at",
     ];
     for (const key of allowed) {
       const value = partial[key];
@@ -1394,7 +1397,7 @@ export const postgresApi = {
         }
         await sql`
           INSERT INTO settings (key, value)
-          VALUES (${key}, ${value.toString()})
+          VALUES (${key}, ${value == null ? "" : value.toString()})
           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         `;
       }
@@ -1526,7 +1529,7 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
         sql`SELECT * FROM settings ORDER BY key`,
         sql`SELECT id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at FROM users ORDER BY id`,
       ]);
-    return createBackupEnvelope({
+    const backup = await createBackupEnvelope({
       backend: "postgres",
       products,
       customers,
@@ -1537,6 +1540,11 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
       settings,
       users,
     });
+    await sql`
+      INSERT INTO settings (key, value) VALUES ('last_backup_at', ${backup.created_at})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
+    return backup;
   },
 
   async pre_migration_backup(reason: string, token: string | null): Promise<BackupEnvelope> {

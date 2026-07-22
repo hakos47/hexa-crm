@@ -174,6 +174,8 @@ export type Settings = {
   default_vat: VatRate;
   /** Minutes without interaction before locking; 0 disables auto-lock. */
   idle_timeout_minutes: number;
+  /** ISO timestamp of the latest locally initiated backup. */
+  last_backup_at: string | null;
 };
 
 export type AiMessage = {

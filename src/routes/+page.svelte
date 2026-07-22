@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
-  import type { DashboardStats, Sale } from "$lib/types";
+  import type { DashboardStats, Sale, Settings } from "$lib/types";
   import { formatEUR } from "$lib/money";
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -10,17 +10,23 @@
   import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
   import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
   import { isOnboardingDone } from "$lib/onboarding/state";
+  import { backupAgeDays, needsBackupReminder } from "$lib/backup/backup-status";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
   let sold14d = $state<Record<number, number>>({});
   let loading = $state(true);
   let onboardingPending = $state(false);
+  let settings = $state<Settings | null>(null);
 
   onMount(async () => {
     try {
       onboardingPending = !isOnboardingDone();
-      [stats, sales] = await Promise.all([api.dashboardStats(), api.listSales()]);
+      [stats, sales, settings] = await Promise.all([
+        api.dashboardStats(),
+        api.listSales(),
+        api.getSettings(),
+      ]);
       // Build sold map for low-stock cover hints (last 14d, cap fetches)
       const cutoff = Date.now() - 14 * 86400000;
       const recentSales = sales
@@ -59,6 +65,8 @@
   });
 
   const recent = $derived(sales.slice(0, 6));
+  const showBackupReminder = $derived(needsBackupReminder(settings?.last_backup_at));
+  const backupDays = $derived(backupAgeDays(settings?.last_backup_at));
 </script>
 
 {#if loading}
@@ -78,6 +86,23 @@
       <a href="/ventas?nuevo=1" class="mt-2 inline-block text-sm text-radiant hover:underline">
         Ir a cobrar →
       </a>
+    </Card>
+  {/if}
+  {#if showBackupReminder}
+    <Card class="mb-4 border border-amber-400/30 bg-amber-500/10" lift={false} data-backup-reminder>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-amber-100">
+            {backupDays === null ? "Aún no hay una copia de seguridad" : `La última copia tiene ${backupDays} días`}
+          </p>
+          <p class="mt-1 text-xs text-amber-100/75">
+            Guarda un JSON local antes de continuar. No se envía nada a la nube.
+          </p>
+        </div>
+        <a href="/ajustes" class="text-sm font-medium text-amber-100 underline-offset-2 hover:underline">
+          Hacer copia →
+        </a>
+      </div>
     </Card>
   {/if}
   <!-- Resumen KPIs -->

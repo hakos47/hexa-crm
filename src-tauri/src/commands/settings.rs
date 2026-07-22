@@ -39,6 +39,10 @@ pub fn settings_from_conn(conn: &rusqlite::Connection) -> Settings {
             .ok()
             .filter(|v| (0..=480).contains(v))
             .unwrap_or(15),
+        last_backup_at: {
+            let value = get_setting(conn, "last_backup_at", "");
+            (!value.is_empty()).then_some(value)
+        },
     }
 }
 

@@ -238,6 +238,7 @@ fn seed_if_empty(conn: &Connection) -> Result<(), String> {
         ("ollama_url", "http://127.0.0.1:11434"),
         ("default_vat", "21"),
         ("idle_timeout_minutes", "15"),
+        ("last_backup_at", ""),
     ];
     for (k, v) in defaults {
         conn.execute(
