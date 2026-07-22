@@ -98,14 +98,25 @@ paths:
     get:
       summary: Inventario visible al operador autenticado de su tenant
       security: [{ operatorBearer: [] }]
+    post:
+      summary: Crea o actualiza inventario del tenant como operador administrador
+      security: [{ operatorBearer: [] }]
   /operator/customers:
     get:
       summary: Clientes visibles al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+    post:
+      summary: Crea o actualiza un cliente del tenant como operador
       security: [{ operatorBearer: [] }]
   /operator/sales:
     get:
       summary: Ventas visibles al operador autenticado de su tenant
       security: [{ operatorBearer: [] }]
+    post:
+      summary: Registra una venta atómica de operador
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
 components:
   securitySchemes:
     serviceHmac:

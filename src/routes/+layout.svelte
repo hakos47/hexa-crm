@@ -22,6 +22,7 @@
   } from "$lib/stores/session";
   import { idleTimeoutMs } from "$lib/auth/idle-timeout";
   import { api } from "$lib/api/client";
+  import { configureRemoteOperator } from "$lib/api/client";
   import { page } from "$app/stores";
   import { showToast } from "$lib/stores/ui";
   import { isOnboardingDone } from "$lib/onboarding/state";
@@ -90,6 +91,7 @@
       return;
     }
     try {
+      configureRemoteOperator($session.remote);
       const me = await api.sessionMe();
       if (me) {
         let companies = $session.companies;
@@ -101,7 +103,7 @@
         } catch {
           /* company API optional on older backends */
         }
-        setSession(me, token, { companies, activeCompanyId });
+        setSession(me, token, { companies, activeCompanyId, remote: $session.remote });
         try {
           const settings = await api.getSettings();
           setIdleTimeoutMinutes(settings.idle_timeout_minutes);

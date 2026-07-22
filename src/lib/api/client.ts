@@ -22,6 +22,26 @@ import type {
 import { browserApi } from "./browser-store";
 import { getToken, clearSession } from "../stores/session";
 import { assertTokenForCommand, PUBLIC_COMMANDS } from "./guard";
+import { remoteOperatorApi, remoteOperatorLogin, type RemoteOperatorConfig } from "./remote-operator";
+
+let remoteOperatorConfig: RemoteOperatorConfig | null = null;
+
+export function configureRemoteOperator(config: RemoteOperatorConfig | null) {
+  remoteOperatorConfig = config ? { endpoint: config.endpoint, tenantCode: config.tenantCode } : null;
+}
+
+export function currentRemoteOperatorConfig() {
+  return remoteOperatorConfig;
+}
+
+function requireRemoteConfig() {
+  if (!remoteOperatorConfig) throw new Error("CRM central no configurado");
+  return remoteOperatorConfig;
+}
+
+function remoteWriteUnavailable(): never {
+  throw new Error("Esta escritura aún no está disponible en CRM central; no se ha guardado nada localmente.");
+}
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -89,8 +109,12 @@ export const api = {
   publicMeta: () => call<{ shop_name: string }>("public_meta"),
   login: (username: string, password: string) =>
     call<LoginResult>("login", { username, password, pin: password }),
-  logout: () => call<void>("logout"),
-  sessionMe: () => call<AuthUser | null>("session_me"),
+  loginRemote: (config: RemoteOperatorConfig, username: string, password: string) => {
+    configureRemoteOperator(config);
+    return remoteOperatorLogin(config, username, password);
+  },
+  logout: () => remoteOperatorConfig ? Promise.resolve() : call<void>("logout"),
+  sessionMe: () => remoteOperatorConfig ? remoteOperatorApi.me(requireRemoteConfig(), getToken() ?? "") : call<AuthUser | null>("session_me"),
   listUsers: () => call<AuthUser[]>("list_users"),
   upsertUser: (input: UserInput) => call<CreateUserResult>("upsert_user", { input }),
   changeOwnPin: (currentPin: string, newPin: string) =>
@@ -101,35 +125,33 @@ export const api = {
       new_password: newPassword,
     }),
 
-  listProducts: (activeOnly = true) =>
-    call<Product[]>("list_products", { active_only: activeOnly }),
-  upsertProduct: (input: ProductInput) => call<Product>("upsert_product", { input }),
-  adjustStock: (productId: number, delta: number, reason: string) =>
-    call<Product>("adjust_stock", { product_id: productId, delta, reason }),
-  listCustomers: () => call<Customer[]>("list_customers"),
-  upsertCustomer: (input: CustomerInput) => call<Customer>("upsert_customer", { input }),
+  listProducts: async (activeOnly = true) => remoteOperatorConfig ? (await remoteOperatorApi.products(requireRemoteConfig(), getToken() ?? "")).filter((product) => !activeOnly || product.active) : call<Product[]>("list_products", { active_only: activeOnly }),
+  upsertProduct: (input: ProductInput) => remoteOperatorConfig ? remoteOperatorApi.saveProduct(requireRemoteConfig(), getToken() ?? "", input) : call<Product>("upsert_product", { input }),
+  adjustStock: (productId: number, delta: number, reason: string) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Product>("adjust_stock", { product_id: productId, delta, reason }),
+  listCustomers: () => remoteOperatorConfig ? remoteOperatorApi.customers(requireRemoteConfig(), getToken() ?? "") : call<Customer[]>("list_customers"),
+  upsertCustomer: (input: CustomerInput) => remoteOperatorConfig ? remoteOperatorApi.saveCustomer(requireRemoteConfig(), getToken() ?? "", input) : call<Customer>("upsert_customer", { input }),
   createSale: (lines: SaleLineInput[], customerId?: number | null, notes?: string) =>
-    call<Sale>("create_sale", {
+    remoteOperatorConfig ? remoteOperatorApi.createSale(requireRemoteConfig(), getToken() ?? "", lines, customerId ?? null, notes ?? "") : call<Sale>("create_sale", {
       lines,
       customer_id: customerId ?? null,
       notes: notes ?? "",
     }),
-  listSales: () => call<Sale[]>("list_sales"),
-  getSale: (id: number) => call<Sale>("get_sale", { id }),
-  cancelSale: (id: number) => call<Sale>("cancel_sale", { id }),
+  listSales: () => remoteOperatorConfig ? remoteOperatorApi.sales(requireRemoteConfig(), getToken() ?? "") : call<Sale[]>("list_sales"),
+  getSale: (id: number) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("get_sale", { id }),
+  cancelSale: (id: number) => remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("cancel_sale", { id }),
   returnSaleLines: (id: number, lines: { line_id: number; qty: number }[]) =>
-    call<Sale>("return_sale_lines", { id, lines }),
-  listCashMovements: () => call<CashMovement[]>("list_cash_movements"),
-  createCashMovement: (input: CashInput) => call<CashMovement>("create_cash_movement", { input }),
-  getCashBalance: () => call<number>("get_cash_balance"),
-  vatSummary: (from: string, to: string) => call<VatSummary>("vat_summary", { from, to }),
-  dashboardStats: () => call<DashboardStats>("dashboard_stats"),
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<Sale>("return_sale_lines", { id, lines }),
+  listCashMovements: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<CashMovement[]>("list_cash_movements"),
+  createCashMovement: (input: CashInput) => remoteOperatorConfig ? remoteWriteUnavailable() : call<CashMovement>("create_cash_movement", { input }),
+  getCashBalance: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<number>("get_cash_balance"),
+  vatSummary: (from: string, to: string) => remoteOperatorConfig ? remoteWriteUnavailable() : call<VatSummary>("vat_summary", { from, to }),
+  dashboardStats: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<DashboardStats>("dashboard_stats"),
   getSettings: () => call<Settings>("get_settings"),
   updateSettings: (partial: Partial<Settings>) =>
     call<Settings>("update_settings", { partial }),
   aiChat: (messages: AiMessage[]) => call<AiChatResult>("ai_chat", { messages }),
   ollamaHealth: () => call<{ ok: boolean; models: string[] }>("ollama_health"),
-  resetDemo: () => call<void>("reset_demo"),
+  resetDemo: () => remoteOperatorConfig ? remoteWriteUnavailable() : call<void>("reset_demo"),
   exportBackup: () => call<unknown>("export_backup"),
   preMigrationBackup: (reason: string) =>
     call<unknown>("pre_migration_backup", { reason }),
