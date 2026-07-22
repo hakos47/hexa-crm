@@ -88,12 +88,33 @@ paths:
         - { name: q, in: query, required: true, schema: { type: string } }
       responses:
         '200': { description: Resultados trazables a su entidad origen }
+  /operator/login:
+    post:
+      summary: Inicia sesión de operador interno para un tenant concreto
+      responses:
+        '200': { description: Sesión temporal de operador }
+        '401': { description: Credenciales inválidas }
+  /operator/products:
+    get:
+      summary: Inventario visible al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+  /operator/customers:
+    get:
+      summary: Clientes visibles al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+  /operator/sales:
+    get:
+      summary: Ventas visibles al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
 components:
   securitySchemes:
     serviceHmac:
       type: apiKey
       in: header
       name: X-Hexa-Signature
+    operatorBearer:
+      type: http
+      scheme: bearer
   responses:
     Error:
       description: Error normalizado

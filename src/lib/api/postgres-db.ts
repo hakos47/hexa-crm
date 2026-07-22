@@ -58,7 +58,7 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
-export const CENTRAL_SCHEMA_VERSION = "0010_order_sales";
+export const CENTRAL_SCHEMA_VERSION = "0011_operator_sessions";
 
 let sql: postgres.Sql;
 
@@ -115,6 +115,29 @@ export async function initDb() {
       PRIMARY KEY (key_id, signature)
     );
   `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS operator_accounts (
+      id UUID PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'cajero')),
+      credential_hash TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      UNIQUE (company_id, username)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS operator_sessions (
+      token_hash TEXT PRIMARY KEY,
+      account_id UUID NOT NULL REFERENCES operator_accounts(id) ON DELETE CASCADE,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS operator_sessions_expiry_idx ON operator_sessions (expires_at)`;
   await sql`
     CREATE TABLE IF NOT EXISTS idempotency_keys (
       company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
