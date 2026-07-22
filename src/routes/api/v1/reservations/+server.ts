@@ -39,6 +39,10 @@ export const POST: RequestHandler = async ({ request, url }) => {
       const productIds = input.lines!.map((line) => line.product_id);
       const products = await tx`SELECT id, stock FROM products WHERE company_id = ${tenant[0].id} AND id IN ${tx(productIds)} FOR UPDATE`;
       const byId = new Map(products.map((product) => [product.id, product]));
+      if (input.external_customer_id) {
+        const identity = await tx`SELECT customer_id FROM external_customer_identities WHERE company_id = ${tenant[0].id} AND source = 'meiga' AND external_user_id = ${input.external_customer_id}`;
+        if (!identity[0]) throw new Error("external_customer_not_found");
+      }
       for (const line of input.lines!) {
         const product = byId.get(line.product_id);
         if (!product || product.stock < line.qty) throw new Error("insufficient_stock");
@@ -60,7 +64,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
     return json({ ...result, request_id: requestId }, { status: 201 });
   } catch (cause) {
     const code = cause instanceof Error ? cause.message : "reservation_failed";
-    const status = code === "replay" ? 409 : code === "insufficient_stock" || code === "idempotency_conflict" ? 409 : 500;
+    const status = code === "replay" || code === "external_customer_not_found" ? 409 : code === "insufficient_stock" || code === "idempotency_conflict" ? 409 : 500;
     return error("No se pudo crear la reserva", code, status, requestId);
   }
 };

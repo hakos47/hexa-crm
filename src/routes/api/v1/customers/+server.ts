@@ -29,7 +29,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
       const known = await tx`SELECT customer_id FROM external_customer_identities WHERE company_id = ${tenant[0].id} AND source = 'meiga' AND external_user_id = ${externalUserId} FOR UPDATE`;
       let customerId = known[0]?.customer_id as number | undefined;
       if (customerId) {
-        await tx`UPDATE customers SET name = ${name}, email = ${input.email ?? ""}, phone = ${input.phone ?? ""} WHERE id = ${customerId} AND company_id = ${tenant[0].id}`;
+        await tx`UPDATE customers SET name = ${name}, email = COALESCE(${input.email ?? null}, email), phone = COALESCE(${input.phone ?? null}, phone) WHERE id = ${customerId} AND company_id = ${tenant[0].id}`;
       } else {
         const created = await tx`INSERT INTO customers (company_id, name, email, phone, nif, notes) VALUES (${tenant[0].id}, ${name}, ${input.email ?? ""}, ${input.phone ?? ""}, '', '') RETURNING id`;
         const createdId = Number(created[0].id);
