@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ request, url }) => {
   if (!verification.ok) return error("Firma de servicio inválida", verification.code, 401, requestId);
   const idempotencyKey = request.headers.get("Idempotency-Key");
   if (!idempotencyKey || idempotencyKey.length > 200) return error("Falta Idempotency-Key", "idempotency_required", 400, requestId);
-  let input: { lines?: { product_id: number; qty: number }[]; expires_at?: string; correlation_id?: string };
+  let input: { lines?: { product_id: number; qty: number }[]; expires_at?: string; external_customer_id?: string; correlation_id?: string };
   try { input = JSON.parse(body); } catch { return error("JSON inválido", "invalid_json", 400, requestId); }
   if (!Array.isArray(input.lines) || !input.lines.length || input.lines.some((line) => !Number.isInteger(line.product_id) || !Number.isInteger(line.qty) || line.qty <= 0)) return error("Líneas de reserva inválidas", "invalid_lines", 400, requestId);
   await initDb();
@@ -42,7 +42,12 @@ export const POST: RequestHandler = async ({ request, url }) => {
         if (!product || product.stock < line.qty) throw new Error("insufficient_stock");
       }
       for (const line of input.lines!) await tx`UPDATE products SET stock = stock - ${line.qty}, updated_at = NOW() WHERE id = ${line.product_id} AND company_id = ${tenant[0].id}`;
-      const response = { reservation_id: crypto.randomUUID(), status: "reserved", expires_at: input.expires_at ?? new Date(Date.now() + 15 * 60_000).toISOString(), lines: input.lines };
+      const reservationId = crypto.randomUUID();
+      const expiresAt = input.expires_at ?? new Date(Date.now() + 15 * 60_000).toISOString();
+      if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) throw new Error("invalid_expiry");
+      await tx`INSERT INTO reservations (id, company_id, status, expires_at, external_customer_id) VALUES (${reservationId}, ${tenant[0].id}, 'reserved', ${expiresAt}, ${input.external_customer_id ?? null})`;
+      for (const line of input.lines!) await tx`INSERT INTO reservation_lines (reservation_id, product_id, qty) VALUES (${reservationId}, ${line.product_id}, ${line.qty})`;
+      const response = { reservation_id: reservationId, status: "reserved", expires_at: expiresAt, lines: input.lines };
       await tx`INSERT INTO idempotency_keys (company_id, operation, key, payload_hash, response) VALUES (${tenant[0].id}, 'reservation', ${idempotencyKey}, ${payloadHash}, ${JSON.stringify(response)}::jsonb)`;
       await tx`INSERT INTO service_audit_log (company_id, key_id, action, request_id, correlation_id) VALUES (${tenant[0].id}, ${keyId}, 'reservation.create', ${requestId}, ${input.correlation_id ?? null})`;
       return response;

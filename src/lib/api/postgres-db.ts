@@ -136,6 +136,17 @@ export async function initDb() {
     );
   `;
   await sql`
+    CREATE TABLE IF NOT EXISTS reservations (
+      id UUID PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK (status IN ('reserved', 'cancelled', 'expired', 'confirmed')),
+      expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      external_customer_id TEXT,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      cancelled_at TIMESTAMP WITH TIME ZONE
+    );
+  `;
+  await sql`
     CREATE TABLE IF NOT EXISTS company_members (
       company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       user_id INTEGER NOT NULL,
@@ -161,6 +172,14 @@ export async function initDb() {
       embedding vector(384),
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS reservation_lines (
+      reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+      qty INTEGER NOT NULL CHECK (qty > 0),
+      PRIMARY KEY (reservation_id, product_id)
     );
   `;
 
@@ -272,7 +291,7 @@ export async function initDb() {
   await seedUsers();
   await seedCompaniesPg();
   await seedProductsAndCustomers();
-  await sql`INSERT INTO schema_migrations (version) VALUES ('0002_service_api') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0003_reservations') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {
