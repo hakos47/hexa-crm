@@ -6,11 +6,12 @@
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
-  import { showToast } from "$lib/stores/ui";
+  import { openAiChat, showToast } from "$lib/stores/ui";
   import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
   import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
   import { isOnboardingDone } from "$lib/onboarding/state";
   import { backupAgeDays, needsBackupReminder } from "$lib/backup/backup-status";
+  import { dashboardHealth } from "$lib/dashboard/health";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
@@ -67,6 +68,9 @@
   const recent = $derived(sales.slice(0, 6));
   const showBackupReminder = $derived(needsBackupReminder(settings?.last_backup_at));
   const backupDays = $derived(backupAgeDays(settings?.last_backup_at));
+  const health = $derived(dashboardHealth(sales, stats?.low_stock ?? [], showBackupReminder));
+  const trendMax = $derived(Math.max(...health.trend.map((day) => day.cents), 1));
+  const deltaLabel = (delta: number | null) => delta === null ? "Sin referencia" : `${delta > 0 ? "+" : ""}${delta}% vs ayer`;
 </script>
 
 {#if loading}
@@ -111,7 +115,7 @@
     <KpiCard
       label="Ventas hoy"
       value={formatEUR(stats.sales_today_cents)}
-      hint="{stats.sales_today_count} ticket(s)"
+      hint={`${stats.sales_today_count} ticket(s) · ${deltaLabel(health.sales_delta_percent)}`}
       icon="◎"
       accent="emerald"
     />
@@ -137,6 +141,49 @@
       accent="amber"
     />
   </div>
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-3" data-dashboard-health>
+    <Card class="lg:col-span-2" lift={false}>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="section-label !normal-case !tracking-wide !text-sm">Pulso de hoy</h2>
+          <p class="mt-1 text-sm text-[var(--color-muted)]">Ticket medio {formatEUR(health.average_ticket_cents)} · {deltaLabel(health.tickets_delta_percent)} en tickets</p>
+        </div>
+        <span class="text-xs text-[var(--color-muted-dim)]">Últimos 7 días</span>
+      </div>
+      <div class="mt-5 flex h-24 items-end gap-2" aria-label="Tendencia de ventas de los últimos siete días">
+        {#each health.trend as day}
+          <div class="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <span class="text-[10px] tabular text-[var(--color-muted-dim)]">{day.cents ? formatEUR(day.cents) : "—"}</span>
+            <div class="w-full rounded-t bg-gradient-to-t from-purple-600 to-violet-300/90 transition-[height] duration-300" style={`height: ${Math.max(6, Math.round((day.cents / trendMax) * 64))}px`}></div>
+            <span class="text-[10px] text-[var(--color-muted-dim)]">{new Date(`${day.date}T12:00:00`).toLocaleDateString("es-ES", { weekday: "narrow" })}</span>
+          </div>
+        {/each}
+      </div>
+    </Card>
+    <Card lift={false}>
+      <div class="mb-3 flex items-center justify-between"><h2 class="section-label !normal-case !tracking-wide !text-sm">Atención ahora</h2><Badge tone={health.alerts.length ? "warn" : "ok"}>{health.alerts.length || "OK"}</Badge></div>
+      {#if health.alerts.length}
+        <ul class="space-y-2">
+          {#each health.alerts as alert (alert.id)}
+            <li><a href={alert.href} class="block rounded-lg border border-[var(--color-border)] bg-black/20 p-2.5 hover:border-purple-400/35"><p class="text-xs font-medium text-[var(--color-text)]">{alert.title}</p><p class="mt-0.5 text-[11px] text-[var(--color-muted-dim)]">{alert.detail} →</p></a></li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="text-sm text-emerald-300">Todo bajo control. Sigue así.</p>
+      {/if}
+    </Card>
+  </div>
+
+  <Card class="mt-4 border border-purple-400/20 bg-purple-500/5" lift={false} data-dashboard-ai-slot>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="section-label !normal-case !tracking-wide !text-sm">Recomendación IA</h2>
+        <p class="mt-1 text-sm text-[var(--color-muted)]">Pregunta por el resumen de hoy, stock o prioridades. Si Ollama está apagado, el resto del CRM sigue disponible.</p>
+      </div>
+      <button type="button" class="min-h-11 rounded-xl border border-purple-400/30 px-4 text-sm font-medium text-radiant hover:bg-purple-500/10" onclick={openAiChat}>Preguntar al asistente</button>
+    </div>
+  </Card>
 
   <div class="mt-8 grid gap-4 lg:grid-cols-3">
     <!-- Stock alerts as pipeline-like cards -->
