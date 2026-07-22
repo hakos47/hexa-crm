@@ -31,6 +31,15 @@ paths:
         '201': { description: Reserva creada }
         '409': { description: Stock insuficiente o clave reutilizada con payload distinto }
         '401': { description: Firma de servicio inválida }
+  /reservations/{id}:
+    delete:
+      summary: Cancela una reserva y libera stock una única vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Reserva cancelada o ya finalizada }
+        '404': { description: Reserva no visible para este tenant }
 components:
   securitySchemes:
     serviceHmac:
