@@ -222,7 +222,23 @@ export type TenantPlugin = {
   secret_configured: boolean;
   status: "inactive" | "needs_secret" | "ready" | "error";
   last_error: string | null;
+  last_check?: string | null;
   updated_at: string | null;
+};
+
+export type PluginLogResult = "ok" | "error" | "blocked";
+
+export type PluginAuditLogEntry = {
+  id: number;
+  company_id: number;
+  user_id?: number | null;
+  actor_name?: string | null;
+  plugin_key: PluginKey;
+  action: string;
+  tool_name?: string | null;
+  result: PluginLogResult;
+  summary?: string | null;
+  created_at: string;
 };
 
 export type PluginTestResult = {

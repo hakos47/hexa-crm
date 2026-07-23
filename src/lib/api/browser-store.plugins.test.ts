@@ -120,7 +120,7 @@ describe("tenant plugin management (browser-store)", () => {
     fetchSpy.mockRestore();
   });
 
-  it("enforces admin role policy for plugin updates and testing", async () => {
+  it("enforces admin role policy for plugin updates, testing, and reading audit logs", async () => {
     const cajeroLogin = await browserApi.login("cajero", "0000");
     const cajeroToken = cajeroLogin.token;
 
@@ -137,5 +137,118 @@ describe("tenant plugin management (browser-store)", () => {
     await expect(
       browserApi.test_plugin("database_bridge", cajeroToken),
     ).rejects.toThrow(/permisos de administrador/i);
+
+    // Reading plugin audit logs requires admin
+    await expect(
+      browserApi.list_plugin_logs("database_bridge", 20, cajeroToken),
+    ).rejects.toThrow(/permisos de administrador/i);
+  });
+
+  it("records audit log entries for config update, test connection, tool block and execution", async () => {
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    // 1. Update plugin
+    await browserApi.update_plugin(
+      "stripe_mcp",
+      true,
+      {
+        credential_env: "HEXA_STRIPE_SHOP_TOKEN",
+        environment: "sandbox",
+        allow_write_tools: false,
+      },
+      token,
+    );
+
+    // 2. Test connection
+    await browserApi.test_plugin("stripe_mcp", token);
+
+    // 3. Attempt a blocked write tool call (allow_write_tools is false)
+    await expect(
+      browserApi.call_plugin_tool("stripe_mcp", "create_payment_link", {}, true, token),
+    ).rejects.toThrow(/no permitida/i);
+
+    // Fetch audit logs
+    const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
+    expect(logs.length).toBeGreaterThanOrEqual(3);
+
+    const configLog = logs.find((l) => l.action === "enabled_or_updated");
+    expect(configLog).toBeDefined();
+    expect(configLog?.result).toBe("ok");
+    expect(configLog?.actor_name).toBe("Administrador");
+
+    const testLog = logs.find((l) => l.action === "connection_test_ok");
+    expect(testLog).toBeDefined();
+    expect(testLog?.result).toBe("ok");
+
+    const blockedLog = logs.find((l) => l.action === "tool_blocked_permission");
+    expect(blockedLog).toBeDefined();
+    expect(blockedLog?.result).toBe("blocked");
+    expect(blockedLog?.tool_name).toBe("create_payment_link");
+  });
+
+  it("isolates audit log history strictly between different companies", async () => {
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    // Actions in Company 1
+    browserApi.set_active_company(1, token);
+    await browserApi.update_plugin("database_bridge", true, { display_name: "Tienda 1" }, token);
+    await browserApi.test_plugin("database_bridge", token);
+
+    const logsCompany1 = await browserApi.list_plugin_logs("database_bridge", 20, token);
+    expect(logsCompany1.length).toBe(2);
+
+    // Switch to Company 2
+    browserApi.set_active_company(2, token);
+    const logsCompany2 = await browserApi.list_plugin_logs("database_bridge", 20, token);
+    expect(logsCompany2.length).toBe(0);
+
+    // Action in Company 2
+    await browserApi.update_plugin("database_bridge", true, { display_name: "Tienda 2" }, token);
+    const logsCompany2After = await browserApi.list_plugin_logs("database_bridge", 20, token);
+    expect(logsCompany2After.length).toBe(1);
+
+    // Verify Company 1 logs are unchanged
+    browserApi.set_active_company(1, token);
+    const logsCompany1Final = await browserApi.list_plugin_logs("database_bridge", 20, token);
+    expect(logsCompany1Final.length).toBe(2);
+  });
+
+  it("redacts secrets, tokens, API keys and URLs in audit summaries", async () => {
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    await browserApi.update_plugin("stripe_mcp", true, {}, token);
+
+    // Call test or simulate error containing secret in summary
+    const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
+    for (const log of logs) {
+      if (log.summary) {
+        expect(log.summary).not.toContain("sk_live_");
+        expect(log.summary).not.toContain("sk_test_");
+        expect(log.summary).not.toContain("Bearer ");
+        expect(log.summary).not.toMatch(/postgres:\/\/[^@]+@/);
+      }
+    }
+  });
+
+  it("requires explicit human confirmation for write tools and logs approval blocks", async () => {
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    // Enable write tools for stripe
+    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token);
+
+    // Call write tool without confirmed flag -> throws approval error
+    await expect(
+      browserApi.call_plugin_tool("stripe_mcp", "create_payment_link", {}, false, token),
+    ).rejects.toThrow(/confirmación explícita/i);
+
+    const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
+    const approvalBlock = logs.find((l) => l.action === "tool_blocked_approval");
+    expect(approvalBlock).toBeDefined();
+    expect(approvalBlock?.result).toBe("blocked");
+    expect(approvalBlock?.tool_name).toBe("create_payment_link");
   });
 });

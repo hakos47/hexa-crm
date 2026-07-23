@@ -19,9 +19,12 @@ import type {
   InventoryMovementType,
   InventoryReason,
   LoginResult,
+  PluginAuditLogEntry,
   PluginConfig,
   PluginKey,
+  PluginLogResult,
   PluginTestResult,
+  PluginToolResult,
   Product,
   ProductInput,
   Sale,
@@ -44,8 +47,12 @@ import type {
 } from "../types";
 import {
   PLUGIN_CATALOG,
+  callStripeTool,
+  listStripeTools,
   pluginDefinition,
+  redactSensitive,
   sanitizePluginConfig,
+  stripeToolAccess,
 } from "../plugins/catalog";
 import {
   billingByCompany,
@@ -113,6 +120,18 @@ type StoredTenantPlugin = {
   updated_at?: string | null;
 };
 
+type StoredPluginAuditLog = {
+  id: number;
+  company_id: number;
+  user_id: number | null;
+  plugin_key: PluginKey;
+  action: string;
+  tool_name?: string | null;
+  result: PluginLogResult;
+  summary?: string | null;
+  created_at: string;
+};
+
 type Store = {
   companies: Company[];
   company_members: CompanyMember[];
@@ -136,6 +155,7 @@ type Store = {
   workProjects: WorkProject[];
   workItems: WorkItem[];
   tenantPlugins?: StoredTenantPlugin[];
+  pluginAuditLogs?: StoredPluginAuditLog[];
   users: StoredUser[];
   sessions: Record<string, SessionRec>;
   settings: Settings;
@@ -154,6 +174,7 @@ type Store = {
     warehouse: number;
     stockLocation: number;
     inventoryMovement: number;
+    pluginAuditLog: number;
   };
 };
 
@@ -317,6 +338,7 @@ function seed(): Store {
     workProjects: [],
     workItems: [],
     tenantPlugins: [],
+    pluginAuditLogs: [],
     users: [],
     sessions: {},
     settings: defaultSettings(),
@@ -335,6 +357,7 @@ function seed(): Store {
       warehouse: 0,
       stockLocation: 0,
       inventoryMovement: 0,
+      pluginAuditLog: 0,
     },
   };
 }
@@ -359,12 +382,14 @@ function load(): Store {
     if (!memoryStore.workProjects) memoryStore.workProjects = [];
     if (!memoryStore.workItems) memoryStore.workItems = [];
     if (!memoryStore.tenantPlugins) memoryStore.tenantPlugins = [];
+    if (!memoryStore.pluginAuditLogs) memoryStore.pluginAuditLogs = [];
     if (memoryStore.seq.warehouse == null) memoryStore.seq.warehouse = 0;
     if (memoryStore.seq.stockLocation == null) memoryStore.seq.stockLocation = 0;
     if (memoryStore.seq.inventoryMovement == null) memoryStore.seq.inventoryMovement = 0;
     if (memoryStore.seq.workCategory == null) memoryStore.seq.workCategory = 0;
     if (memoryStore.seq.workProject == null) memoryStore.seq.workProject = 0;
     if (memoryStore.seq.workItem == null) memoryStore.seq.workItem = 0;
+    if (memoryStore.seq.pluginAuditLog == null) memoryStore.seq.pluginAuditLog = 0;
     return memoryStore;
   }
   let raw = localStorage.getItem(KEY);
@@ -400,6 +425,7 @@ function load(): Store {
     if (!parsed.workProjects) parsed.workProjects = [];
     if (!parsed.workItems) parsed.workItems = [];
     if (!parsed.tenantPlugins) parsed.tenantPlugins = [];
+    if (!parsed.pluginAuditLogs) parsed.pluginAuditLogs = [];
     if (!parsed.seq) {
       parsed.seq = {
         product: 0,
@@ -416,6 +442,7 @@ function load(): Store {
         warehouse: 0,
         stockLocation: 0,
         inventoryMovement: 0,
+        pluginAuditLog: 0,
       };
     }
     if (parsed.seq.user == null) parsed.seq.user = parsed.users.length;
@@ -426,6 +453,7 @@ function load(): Store {
     if (parsed.seq.workCategory == null) parsed.seq.workCategory = 0;
     if (parsed.seq.workProject == null) parsed.seq.workProject = 0;
     if (parsed.seq.workItem == null) parsed.seq.workItem = 0;
+    if (parsed.seq.pluginAuditLog == null) parsed.seq.pluginAuditLog = parsed.pluginAuditLogs.length;
     for (const [tok, sess] of Object.entries(parsed.sessions)) {
       if (sess && (sess as SessionRec).active_company_id === undefined) {
         (sess as SessionRec).active_company_id = 1;
@@ -737,6 +765,34 @@ function monthKey(iso: string) {
   return iso.slice(0, 7);
 }
 
+function pluginAuditLocal(
+  s: Store,
+  companyId: number,
+  userId: number | null,
+  pluginKey: PluginKey,
+  action: string,
+  toolName?: string | null,
+  result: PluginLogResult = "ok",
+  summary?: string | null,
+) {
+  if (!s.pluginAuditLogs) s.pluginAuditLogs = [];
+  if (s.seq.pluginAuditLog == null) s.seq.pluginAuditLog = s.pluginAuditLogs.length;
+  s.seq.pluginAuditLog += 1;
+  const cleanSummary = redactSensitive(summary ?? "").slice(0, 255) || null;
+  s.pluginAuditLogs.push({
+    id: s.seq.pluginAuditLog,
+    company_id: companyId,
+    user_id: userId,
+    plugin_key: pluginKey,
+    action,
+    tool_name: toolName ?? null,
+    result,
+    summary: cleanSummary,
+    created_at: now(),
+  });
+  save(s);
+}
+
 function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantPlugin {
   const definition = pluginDefinition(key);
   const stored = (s.tenantPlugins || []).find(
@@ -745,6 +801,12 @@ function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantP
   const config = sanitizePluginConfig(key, stored?.config ?? definition.defaultConfig);
   const enabled = !!stored?.enabled;
   const secretConfigured = true;
+  const logs = (s.pluginAuditLogs || []).filter(
+    (l) => l.company_id === companyId && l.plugin_key === key,
+  );
+  const lastLog = logs.length > 0 ? logs[logs.length - 1] : null;
+  const lastCheck = lastLog ? lastLog.created_at : stored?.updated_at ?? null;
+
   return {
     plugin_key: key,
     name: definition.name,
@@ -756,6 +818,7 @@ function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantP
     secret_configured: secretConfigured,
     status: !enabled ? "inactive" : stored?.last_error ? "error" : "ready",
     last_error: stored?.last_error ?? null,
+    last_check: lastCheck,
     updated_at: stored?.updated_at ?? null,
   };
 }
@@ -2023,6 +2086,7 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
       warehouse: payload.seq?.warehouse ?? warehouses.length,
       stockLocation: payload.seq?.stockLocation ?? stockLocations.length,
       inventoryMovement: payload.seq?.inventoryMovement ?? inventoryMovements.length,
+      pluginAuditLog: payload.seq?.pluginAuditLog ?? 0,
     };
     // Keep current sessions empty after restore — force re-login
     save({
@@ -2506,7 +2570,7 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     token?: string | null,
   ): Promise<TenantPlugin> {
     const s = load();
-    requireAdmin(s, token);
+    const user = requireAdmin(s, token);
     const companyId = sessionCompanyId(s, token);
     pluginDefinition(pluginKey);
     const config = sanitizePluginConfig(pluginKey, inputConfig);
@@ -2528,6 +2592,16 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
       s.tenantPlugins.push(updatedRecord);
     }
     save(s);
+    pluginAuditLocal(
+      s,
+      companyId,
+      user.id,
+      pluginKey,
+      enabled ? "enabled_or_updated" : "disabled",
+      null,
+      "ok",
+      enabled ? "Configuración guardada y plugin activado" : "Plugin desactivado",
+    );
     return tenantPluginLocal(s, companyId, pluginKey);
   },
 
@@ -2536,11 +2610,21 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     token?: string | null,
   ): Promise<PluginTestResult> {
     const s = load();
-    requireAdmin(s, token);
+    const user = requireAdmin(s, token);
     const companyId = sessionCompanyId(s, token);
     pluginDefinition(pluginKey);
     const plugin = tenantPluginLocal(s, companyId, pluginKey);
     if (!plugin.enabled) {
+      pluginAuditLocal(
+        s,
+        companyId,
+        user.id,
+        pluginKey,
+        "connection_test_failed",
+        null,
+        "error",
+        "Activa y guarda el plugin antes de probarlo",
+      );
       throw new Error("Activa y guarda el plugin antes de probarlo");
     }
 
@@ -2554,18 +2638,165 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
       save(s);
     }
 
+    const testMsg =
+      pluginKey === "database_bridge"
+        ? `Simulación local: Conexión simulada con éxito a ${plugin.config.display_name || "Base de datos externa"}`
+        : `Simulación local: Stripe MCP simulado en entorno ${plugin.config.environment ?? "sandbox"}`;
+
+    pluginAuditLocal(
+      s,
+      companyId,
+      user.id,
+      pluginKey,
+      "connection_test_ok",
+      null,
+      "ok",
+      testMsg,
+    );
+
     if (pluginKey === "database_bridge") {
       return {
         ok: true,
-        message: `Simulación local: Conexión simulada con éxito a ${plugin.config.display_name || "Base de datos externa"}`,
+        message: testMsg,
         details: { mode: "local", simulation: true, access_mode: plugin.config.access_mode },
       };
     }
 
     return {
       ok: true,
-      message: `Simulación local: Stripe MCP simulado en entorno ${plugin.config.environment ?? "sandbox"}`,
+      message: testMsg,
       details: { mode: "local", simulation: true, environment: plugin.config.environment ?? "sandbox" },
     };
+  },
+
+  async list_plugin_tools(pluginKey: PluginKey, token?: string | null): Promise<any[]> {
+    const s = load();
+    requireSession(s, token);
+    if (pluginKey !== "stripe_mcp") return [];
+    const companyId = sessionCompanyId(s, token);
+    const plugin = tenantPluginLocal(s, companyId, pluginKey);
+    if (!plugin.enabled || !plugin.secret_configured) return [];
+    const tools = await listStripeTools(plugin.config);
+    return tools.filter((tool) => stripeToolAccess(String(tool?.name ?? ""), plugin.config).allowed);
+  },
+
+  async call_plugin_tool(
+    pluginKey: PluginKey,
+    toolName: string,
+    args: Record<string, unknown>,
+    confirmed = false,
+    token?: string | null,
+  ): Promise<PluginToolResult> {
+    const s = load();
+    const user = requireSession(s, token);
+    const companyId = sessionCompanyId(s, token);
+    pluginDefinition(pluginKey);
+    if (pluginKey !== "stripe_mcp") throw new Error("Este plugin no expone herramientas al asistente");
+    const plugin = tenantPluginLocal(s, companyId, pluginKey);
+    if (!plugin.enabled) {
+      pluginAuditLocal(
+        s,
+        companyId,
+        user.id,
+        pluginKey,
+        "tool_requested",
+        toolName,
+        "blocked",
+        "El plugin Stripe MCP no está activo para esta tienda",
+      );
+      throw new Error("El plugin Stripe MCP no está activo para esta tienda");
+    }
+    const access = stripeToolAccess(toolName, plugin.config);
+    if (!access.allowed) {
+      pluginAuditLocal(
+        s,
+        companyId,
+        user.id,
+        pluginKey,
+        "tool_blocked_permission",
+        toolName,
+        "blocked",
+        "Herramienta de Stripe no permitida en este tenant",
+      );
+      throw new Error("Herramienta de Stripe no permitida en este tenant");
+    }
+    if (access.write) {
+      if (user.role !== "admin") {
+        pluginAuditLocal(
+          s,
+          companyId,
+          user.id,
+          pluginKey,
+          "tool_blocked_permission",
+          toolName,
+          "blocked",
+          "Las operaciones de Stripe requieren un administrador",
+        );
+        throw new Error("Las operaciones de Stripe requieren un administrador");
+      }
+      if (!confirmed) {
+        pluginAuditLocal(
+          s,
+          companyId,
+          user.id,
+          pluginKey,
+          "tool_blocked_approval",
+          toolName,
+          "blocked",
+          "Esta operación necesita confirmación explícita",
+        );
+        throw new Error("Esta operación necesita confirmación explícita");
+      }
+    }
+    try {
+      const result = await callStripeTool(plugin.config, toolName, args ?? {});
+      pluginAuditLocal(
+        s,
+        companyId,
+        user.id,
+        pluginKey,
+        access.write ? "tool_write" : "tool_read",
+        toolName,
+        "ok",
+        `Ejecución exitosa de ${toolName}`,
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      pluginAuditLocal(s, companyId, user.id, pluginKey, "tool_error", toolName, "error", msg);
+      throw err;
+    }
+  },
+
+  async list_plugin_logs(
+    pluginKey: PluginKey,
+    limit = 20,
+    token?: string | null,
+  ): Promise<PluginAuditLogEntry[]> {
+    const s = load();
+    requireAdmin(s, token);
+    const companyId = sessionCompanyId(s, token);
+    pluginDefinition(pluginKey);
+    const maxLimit = Math.min(Math.max(1, limit), 100);
+    const logs = (s.pluginAuditLogs || [])
+      .filter((l) => l.company_id === companyId && l.plugin_key === pluginKey)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, maxLimit);
+
+    return logs.map((l) => {
+      const actor = l.user_id ? s.users.find((u) => u.id === l.user_id) : null;
+      return {
+        id: l.id,
+        company_id: l.company_id,
+        user_id: l.user_id,
+        actor_name: actor ? actor.display_name : "Sistema",
+        plugin_key: l.plugin_key,
+        action: l.action,
+        tool_name: l.tool_name ?? null,
+        result: l.result ?? "ok",
+        summary: l.summary ?? null,
+        created_at: l.created_at,
+      };
+    });
   },
 };

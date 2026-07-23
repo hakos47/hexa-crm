@@ -90,6 +90,13 @@ export const POST: RequestHandler = async ({ request }) => {
           token,
         );
         break;
+      case "list_plugin_logs":
+        result = await postgresApi.list_plugin_logs(
+          args?.plugin_key,
+          (args?.limit as number) ?? 20,
+          token,
+        );
+        break;
       case "list_users":
         result = await postgresApi.list_users(token);
         break;

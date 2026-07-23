@@ -15,6 +15,7 @@ import type {
   LoginResult,
   Product,
   ProductInput,
+  PluginAuditLogEntry,
   PluginConfig,
   PluginKey,
   PluginTestResult,
@@ -129,6 +130,9 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "list_plugins": return browserApi.list_plugins(token) as Promise<T>;
     case "update_plugin": return browserApi.update_plugin(args.plugin_key, args.enabled, args.config, token) as Promise<T>;
     case "test_plugin": return browserApi.test_plugin(args.plugin_key, token) as Promise<T>;
+    case "list_plugin_tools": return browserApi.list_plugin_tools(args.plugin_key, token) as Promise<T>;
+    case "call_plugin_tool": return browserApi.call_plugin_tool(args.plugin_key, args.tool_name, args.arguments, !!args.confirmed, token) as Promise<T>;
+    case "list_plugin_logs": return browserApi.list_plugin_logs(args.plugin_key, args.limit, token) as Promise<T>;
     case "ai_chat": return browserApi.ai_chat(args.messages, token) as Promise<T>;
     case "ollama_health": return browserApi.ollama_health(token) as Promise<T>;
     case "reset_demo": return browserApi.reset_demo(token) as Promise<T>;
@@ -307,6 +311,8 @@ export const api = {
     arguments: args,
     confirmed,
   }),
+  listPluginLogs: (pluginKey: PluginKey, limit = 20) =>
+    call<PluginAuditLogEntry[]>("list_plugin_logs", { plugin_key: pluginKey, limit }),
   supportsWorkManagement,
   listWorkProjects: (statusFilter?: string) =>
     remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject[]>("list_work_projects", { status_filter: statusFilter }),

@@ -6,12 +6,27 @@ import {
   STRIPE_WRITE_TOOLS,
   sanitizeStripeConfig,
   stripeToolAccess as vendorStripeToolAccess,
+  listStripeTools as vendorListStripeTools,
+  testStripePlugin as vendorTestStripePlugin,
+  callStripeTool as vendorCallStripeTool,
 } from "../../../vendor/hexa-crm-plugins/plugins/stripe/src/index";
 
 export { STRIPE_MCP_URL, STRIPE_READ_TOOLS, STRIPE_WRITE_TOOLS };
 
 export function stripeToolAccess(toolName: string, config: PluginConfig) {
   return vendorStripeToolAccess(toolName, config as any);
+}
+
+export function listStripeTools(config: PluginConfig) {
+  return vendorListStripeTools(config as any);
+}
+
+export function testStripePlugin(config: PluginConfig) {
+  return vendorTestStripePlugin(config as any);
+}
+
+export function callStripeTool(config: PluginConfig, name: string, args: Record<string, unknown>) {
+  return vendorCallStripeTool(config as any, name, args);
 }
 
 
@@ -68,4 +83,21 @@ export function sanitizePluginConfig(key: PluginKey, input: unknown): PluginConf
     };
   }
   return sanitizeStripeConfig(input);
+}
+
+/**
+ * Sanitiza y redacta cadenas eliminando secretos, tokens, credenciales y URLs sensibles
+ * para asegurar que nunca se guarden en logs de auditoría ni se devuelvan en la UI.
+ */
+export function redactSensitive(input: string | null | undefined): string {
+  if (!input) return "";
+  let redacted = String(input);
+  redacted = redacted.replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, "postgresql://[REDACTADO]@");
+  redacted = redacted.replace(/(?:sk|pk|rk)_(?:live|test)_[a-zA-Z0-9]+/gi, "[SECRET_REDACTADO]");
+  redacted = redacted.replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, "Bearer [REDACTADO]");
+  redacted = redacted.replace(/(?:password|secret|token|api_key|credential|key)=[^&\s,;]+/gi, (match) => {
+    const eqIdx = match.indexOf("=");
+    return `${match.slice(0, eqIdx)}=[REDACTADO]`;
+  });
+  return redacted;
 }

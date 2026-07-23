@@ -33,8 +33,10 @@ import type {
   LoginResult,
   Product,
   ProductInput,
+  PluginAuditLogEntry,
   PluginConfig,
   PluginKey,
+  PluginLogResult,
   PluginTestResult,
   PluginToolResult,
   ReturnLineInput,
@@ -68,6 +70,7 @@ import { planPartialReturn, remainingLineAmounts } from "../sales/partial-return
 import {
   PLUGIN_CATALOG,
   pluginDefinition,
+  redactSensitive,
   sanitizePluginConfig,
   stripeToolAccess,
 } from "../plugins/catalog";
@@ -417,9 +420,13 @@ export async function initDb() {
       plugin_key TEXT NOT NULL,
       action TEXT NOT NULL,
       tool_name TEXT,
+      result TEXT NOT NULL DEFAULT 'ok',
+      summary TEXT,
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE plugin_audit_log ADD COLUMN IF NOT EXISTS result TEXT NOT NULL DEFAULT 'ok'`;
+  await sql`ALTER TABLE plugin_audit_log ADD COLUMN IF NOT EXISTS summary TEXT`;
 
   // Multi-empresa columns (idempotent)
   await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS active_company_id INTEGER`;
@@ -454,7 +461,7 @@ export async function initDb() {
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
-  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log"] as const) {
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log", "plugin_audit_log"] as const) {
     const policy = `${table}_tenant_isolation`;
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
@@ -959,6 +966,17 @@ async function tenantPlugin(companyId: number, key: PluginKey): Promise<TenantPl
     config,
     key === "database_bridge" ? "database" : "stripe",
   );
+  const lastLogRows = await sql`
+    SELECT created_at FROM plugin_audit_log
+    WHERE company_id = ${companyId} AND plugin_key = ${key}
+    ORDER BY id DESC LIMIT 1
+  `;
+  const lastCheck = lastLogRows[0]?.created_at
+    ? toIso(lastLogRows[0].created_at)
+    : row?.updated_at
+      ? toIso(row.updated_at)
+      : null;
+
   return {
     plugin_key: key,
     name: definition.name,
@@ -970,20 +988,24 @@ async function tenantPlugin(companyId: number, key: PluginKey): Promise<TenantPl
     secret_configured: secretConfigured,
     status: !enabled ? "inactive" : row?.last_error ? "error" : secretConfigured ? "ready" : "needs_secret",
     last_error: row?.last_error ?? null,
+    last_check: lastCheck,
     updated_at: row?.updated_at ? toIso(row.updated_at) : null,
   };
 }
 
 async function pluginAudit(
   companyId: number,
-  userId: number,
+  userId: number | null,
   key: PluginKey,
   action: string,
-  toolName?: string,
+  toolName?: string | null,
+  result: PluginLogResult = "ok",
+  summary?: string | null,
 ) {
+  const cleanSummary = redactSensitive(summary ?? "").slice(0, 255) || null;
   await sql`
-    INSERT INTO plugin_audit_log (company_id, user_id, plugin_key, action, tool_name)
-    VALUES (${companyId}, ${userId}, ${key}, ${action}, ${toolName ?? null})
+    INSERT INTO plugin_audit_log (company_id, user_id, plugin_key, action, tool_name, result, summary)
+    VALUES (${companyId}, ${userId}, ${key}, ${action}, ${toolName ?? null}, ${result}, ${cleanSummary})
   `;
 }
 
@@ -1162,7 +1184,15 @@ export const postgresApi = {
         last_error = NULL,
         updated_at = NOW()
     `;
-    await pluginAudit(companyId, user.id, pluginKey, enabled ? "enabled_or_updated" : "disabled");
+    await pluginAudit(
+      companyId,
+      user.id,
+      pluginKey,
+      enabled ? "enabled_or_updated" : "disabled",
+      null,
+      "ok",
+      enabled ? "Configuración guardada y plugin activado" : "Plugin desactivado",
+    );
     return tenantPlugin(companyId, pluginKey);
   },
 
@@ -1172,18 +1202,29 @@ export const postgresApi = {
     pluginDefinition(pluginKey);
     const companyId = await resolveActiveCompanyId(token, user.id);
     const plugin = await tenantPlugin(companyId, pluginKey);
-    if (!plugin.enabled) throw new Error("Activa y guarda el plugin antes de probarlo");
+    if (!plugin.enabled) {
+      await pluginAudit(
+        companyId,
+        user.id,
+        pluginKey,
+        "connection_test_failed",
+        null,
+        "error",
+        "Activa y guarda el plugin antes de probarlo",
+      );
+      throw new Error("Activa y guarda el plugin antes de probarlo");
+    }
     try {
       const result = pluginKey === "database_bridge"
         ? await testDatabasePlugin(plugin.config)
         : await testStripePlugin(plugin.config);
       await sql`UPDATE tenant_plugins SET last_error = NULL, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
-      await pluginAudit(companyId, user.id, pluginKey, "connection_test_ok");
+      await pluginAudit(companyId, user.id, pluginKey, "connection_test_ok", null, "ok", result.message);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo conectar";
       await sql`UPDATE tenant_plugins SET last_error = ${message.slice(0, 500)}, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
-      await pluginAudit(companyId, user.id, pluginKey, "connection_test_failed");
+      await pluginAudit(companyId, user.id, pluginKey, "connection_test_failed", null, "error", message);
       throw new Error(message);
     }
   },
@@ -1211,16 +1252,108 @@ export const postgresApi = {
     if (pluginKey !== "stripe_mcp") throw new Error("Este plugin no expone herramientas al asistente");
     const companyId = await resolveActiveCompanyId(token, user.id);
     const plugin = await tenantPlugin(companyId, pluginKey);
-    if (!plugin.enabled) throw new Error("El plugin Stripe MCP no está activo para esta tienda");
-    const access = stripeToolAccess(toolName, plugin.config);
-    if (!access.allowed) throw new Error("Herramienta de Stripe no permitida en este tenant");
-    if (access.write) {
-      if (user.role !== "admin") throw new Error("Las operaciones de Stripe requieren un administrador");
-      if (!confirmed) throw new Error("Esta operación necesita confirmación explícita");
+    if (!plugin.enabled) {
+      await pluginAudit(
+        companyId,
+        user.id,
+        pluginKey,
+        "tool_requested",
+        toolName,
+        "blocked",
+        "El plugin Stripe MCP no está activo para esta tienda",
+      );
+      throw new Error("El plugin Stripe MCP no está activo para esta tienda");
     }
-    const result = await callStripeTool(plugin.config, toolName, args ?? {});
-    await pluginAudit(companyId, user.id, pluginKey, access.write ? "tool_write" : "tool_read", toolName);
-    return result;
+    const access = stripeToolAccess(toolName, plugin.config);
+    if (!access.allowed) {
+      await pluginAudit(
+        companyId,
+        user.id,
+        pluginKey,
+        "tool_blocked_permission",
+        toolName,
+        "blocked",
+        "Herramienta de Stripe no permitida en este tenant",
+      );
+      throw new Error("Herramienta de Stripe no permitida en este tenant");
+    }
+    if (access.write) {
+      if (user.role !== "admin") {
+        await pluginAudit(
+          companyId,
+          user.id,
+          pluginKey,
+          "tool_blocked_permission",
+          toolName,
+          "blocked",
+          "Las operaciones de Stripe requieren un administrador",
+        );
+        throw new Error("Las operaciones de Stripe requieren un administrador");
+      }
+      if (!confirmed) {
+        await pluginAudit(
+          companyId,
+          user.id,
+          pluginKey,
+          "tool_blocked_approval",
+          toolName,
+          "blocked",
+          "Esta operación necesita confirmación explícita",
+        );
+        throw new Error("Esta operación necesita confirmación explícita");
+      }
+    }
+    try {
+      const result = await callStripeTool(plugin.config, toolName, args ?? {});
+      await pluginAudit(
+        companyId,
+        user.id,
+        pluginKey,
+        access.write ? "tool_write" : "tool_read",
+        toolName,
+        "ok",
+        `Ejecución exitosa de ${toolName}`,
+      );
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await pluginAudit(companyId, user.id, pluginKey, "tool_error", toolName, "error", msg);
+      throw err;
+    }
+  },
+
+  async list_plugin_logs(
+    pluginKey: PluginKey,
+    limit = 20,
+    token: string | null,
+  ): Promise<PluginAuditLogEntry[]> {
+    const user = await requireAdmin(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    pluginDefinition(pluginKey);
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    const maxLimit = Math.min(Math.max(1, limit), 100);
+
+    const rows = await sql`
+      SELECT l.id, l.company_id, l.user_id, u.display_name AS actor_name, l.plugin_key, l.action, l.tool_name, l.result, l.summary, l.created_at
+      FROM plugin_audit_log l
+      LEFT JOIN users u ON u.id = l.user_id
+      WHERE l.company_id = ${companyId} AND l.plugin_key = ${pluginKey}
+      ORDER BY l.id DESC
+      LIMIT ${maxLimit}
+    `;
+
+    return rows.map((r) => ({
+      id: Number(r.id),
+      company_id: Number(r.company_id),
+      user_id: r.user_id ? Number(r.user_id) : null,
+      actor_name: r.actor_name ?? "Sistema",
+      plugin_key: r.plugin_key as PluginKey,
+      action: r.action,
+      tool_name: r.tool_name ?? null,
+      result: (r.result as PluginLogResult) || "ok",
+      summary: r.summary ?? null,
+      created_at: toIso(r.created_at),
+    }));
   },
 
   async list_users(token: string | null): Promise<AuthUser[]> {

@@ -41,4 +41,24 @@ describe("PluginManager client API in local mode", () => {
     expect(testRes.ok).toBe(true);
     expect(testRes.message).toContain("Simulación local");
   });
+
+  it("api.listPluginLogs() retrieves audit log history for active tenant", async () => {
+    const login = await api.login("admin", "1234");
+    setSession(login.user, login.token, {
+      companies: login.companies,
+      activeCompanyId: login.active_company_id,
+    });
+
+    await api.updatePlugin("stripe_mcp", true, {
+      environment: "sandbox",
+      credential_env: "HEXA_STRIPE_SHOP_TOKEN",
+    });
+
+    await api.testPlugin("stripe_mcp");
+
+    const logs = await api.listPluginLogs("stripe_mcp", 20);
+    expect(logs.length).toBe(2);
+    expect(logs[0].result).toBe("ok");
+    expect(logs[0].actor_name).toBe("Administrador");
+  });
 });
