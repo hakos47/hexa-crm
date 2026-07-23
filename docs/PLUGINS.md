@@ -1,33 +1,72 @@
-# Plugins por tenant
+# Sistema de Plugins por Tenant
 
-Los plugins se administran desde **Ajustes → Plugins**. Su estado y configuración se guardan por `company_id`, de modo que activar Stripe en una tienda no lo activa en las demás.
+Los plugins en **HEXA-CRM** extienden las capacidades del sistema y del asistente IA por cada empresa (`company_id`). La administración se realiza desde **Ajustes → Plugins**, garantizando que la activación o configuración de un plugin en un tenant no afecte a los demás.
 
-## Secretos
+> [!IMPORTANT]
+> Para conocer las especificaciones técnicas y los límites formales entre el CRM Host, los plugins y el agregador, consulta el [Contrato de Integración Host-Plugin](PLUGIN_HOST_CONTRACT.md).
 
-El CRM guarda únicamente el nombre de una variable de entorno. Nunca persiste URLs con contraseña, API keys ni tokens OAuth en `tenant_plugins`.
+---
 
-Ejemplo para el servicio web:
+## 1. Arquitectura y Agregador Central
+
+El ecosistema de plugins sigue una arquitectura centralizada de agregación mediante submódulos de Git:
+
+- **Agregador Oficial**: `git@github.com:HEXA-NIX/hexa-crm-plugins.git`
+- El agregador contiene **únicamente submódulos de Git** pinneados a versiones estables y verificadas de cada plugin.
+- El CRM Host no aloja código fuente directo de plugins de terceros en su árbol principal ni compila repositorios sin fijar su SHA.
+
+---
+
+## 2. Separación de Responsabilidades
+
+Para mantener la seguridad y el aislamiento operacional, las responsabilidades se dividen estrictamente entre tres niveles:
+
+| Componente | Responsabilidades |
+| :--- | :--- |
+| **CRM Host (`hexa-crm`)** | - Aislamiento multi-tenant por `company_id`.<br>- Control de acceso basado en RBAC.<br>- Resolución de referencias a secretos mediante variables de entorno (`HEXA_*`).<br>- Auditoría inmutable en `plugin_audit_log`.<br>- Exigencia de confirmación humana obligatoria para acciones de escritura o alto privilegio. |
+| **Repositorio de Plugin** | - Código fuente desacoplado e implementación de handlers.<br>- Definición de esquemas de herramientas y tipos.<br>- Control de versión e integración propia. |
+| **Agregador (`hexa-crm-plugins.git`)** | - Registro exclusivo de referencias `.gitmodules` y gitlinks.<br>- Sin código de ejecución en el directorio raíz. |
+
+---
+
+## 3. Política de Seguridad: Prohibición de Código Remoto Arbitrario
+
+Queda **estrictamente prohibido** cargar o ejecutar código remoto de forma dinámica en tiempo de ejecución:
+
+- No se permite el uso de `eval()`, descargas dinámicas de scripts desde URLs/CDNs externas, ni invocación de binarios no verificados en runtime.
+- Todo el código ejecutado debe estar contenido dentro de los submódulos pinneados en el agregador, auditado previamente e integrado determinísticamente durante la etapa de compilación y despliegue del Host.
+
+---
+
+## 4. Gestión de Secretos
+
+El CRM Host guarda únicamente el **nombre de la variable de entorno** referenciada. Nunca persiste contraseñas, API keys, credenciales o tokens OAuth en las tablas del tenant (`tenant_plugins`).
+
+Ejemplo de configuración en el entorno del servicio:
 
 ```env
 HEXA_PLUGIN_DATABASE_SHOP_URL=postgresql://usuario:clave@host:5432/tienda
 HEXA_STRIPE_SHOP_TOKEN=rk_test_...
 ```
 
-Tras añadir o rotar un secreto, reinicia el servicio y usa **Probar conexión**.
+Tras añadir o rotar una referencia a secreto, es necesario reiniciar el servicio y ejecutar **Probar conexión**.
 
-## Base de datos externa
+---
 
-El plugin verifica una conexión PostgreSQL independiente. El modo recomendado para centralización inicial es `read_only`. Cada tenant puede apuntar a una base distinta usando una variable diferente.
+## 5. Plugins Integrados y Estrategia de Transición
 
-## Stripe MCP
+Actualmente, el sistema cuenta con dos plugins principales originados en el catálogo local (`src/lib/plugins/`):
 
-El endpoint está fijado a `https://mcp.stripe.com`. Para agentes autónomos debe usarse una clave restringida con el mínimo permiso necesario.
+- **Base de datos externa (`database_bridge`)**: Conexión PostgreSQL independiente por tenant. Modo recomendado inicial: `read_only`.
+- **Stripe MCP (`stripe_mcp`)**: Integración con las herramientas de Stripe MCP (`https://mcp.stripe.com`). Requiere confirmación humana explícita para operaciones de escritura.
 
-- Las consultas autorizadas pueden ejecutarse desde el asistente.
-- Las herramientas de escritura se bloquean hasta que un administrador las habilite.
-- Cada escritura necesita además confirmación explícita en la conversación.
-- Las invocaciones se registran en `plugin_audit_log` sin guardar argumentos ni secretos.
+### Plan de Transición de Plugins Locales
+> [!NOTE]
+> La extracción de los plugins locales `database_bridge` y `stripe_mcp` hacia repositorios independientes está en **fase de planificación y transición activa**. Los plugins in-tree se mantendrán hasta la completa validación e inclusión de sus submódulos en el agregador `hexa-crm-plugins.git`.
 
-La migración aditiva correspondiente es `0013_tenant_plugins` y crea `tenant_plugins` y `plugin_audit_log` sin modificar tablas comerciales existentes.
+---
 
-Stripe MCP está en public preview; valida el flujo en sandbox antes de seleccionar producción.
+## 6. Referencias
+
+- Especificación detallada de interfaces, puertas de validación y estructura de submódulos: [PLUGIN_HOST_CONTRACT.md](PLUGIN_HOST_CONTRACT.md).
+- Migración de base de datos para plugins: `0013_tenant_plugins.sql` (tablas `tenant_plugins` y `plugin_audit_log`).
