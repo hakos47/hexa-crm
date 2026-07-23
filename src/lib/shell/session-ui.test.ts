@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const LAYOUT = resolve(__dirname, "../../routes/+layout.svelte");
+const APP_CSS = resolve(__dirname, "../../app.css");
 const SIDEBAR = resolve(__dirname, "../components/Sidebar.svelte");
 const DASH = resolve(__dirname, "../../routes/+page.svelte");
 const INV = resolve(__dirname, "../../routes/inventario/+page.svelte");
@@ -27,6 +28,27 @@ describe("session logout UI (#9)", () => {
     expect(sidebar).toMatch(/Cerrar sesión/);
     expect(sidebar).toContain("data-logout");
     expect(sidebar).toContain("onLogout");
+  });
+
+  it("resets and enforces the configured inactivity lock", () => {
+    expect(layout).toContain("idleTimeoutMinutes");
+    expect(layout).toContain("lockAfterIdle");
+    expect(layout).toMatch(/pointerdown.*keydown.*touchstart.*scroll/s);
+  });
+
+  it("gives master profiles an explicit assigned/all-companies toggle", () => {
+    expect(layout).toContain("data-master-companies-toggle");
+    expect(layout).toContain("data-master-company-menu");
+    expect(layout).toContain("api.listCompanies(true)");
+    expect(layout).toMatch(/Todas ↓/);
+    expect(layout).toContain("data-master-own-companies");
+  });
+
+  it("keeps company menus above the scrollable workspace", () => {
+    const css = readFileSync(APP_CSS, "utf8");
+    expect(css).toMatch(/\.app-header\s*\{[^}]*z-index:\s*100[^}]*overflow:\s*visible/s);
+    expect(css).toMatch(/\.app-main\s*\{[^}]*position:\s*relative[^}]*z-index:\s*0/s);
+    expect(css).toMatch(/\.app-header-master-menu\s*\{[^}]*z-index:\s*120/s);
   });
 });
 

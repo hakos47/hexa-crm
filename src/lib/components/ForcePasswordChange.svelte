@@ -35,18 +35,17 @@
   }
 </script>
 
-<div class="relative flex min-h-screen items-center justify-center p-4 sm:p-6">
+<div class="login-stage relative flex min-h-screen items-center justify-center p-4 sm:p-6">
+  <img class="login-backdrop" src="/crm-hero-v1.webp" alt="" width="1672" height="941" />
+  <div class="login-stage-scrim"></div>
   <div
-    class="pointer-events-none absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-purple-600/20 blur-[100px]"
-  ></div>
-  <div
-    class="glass-strong relative z-10 w-full max-w-md rounded-3xl border border-[var(--color-border-strong)] p-6 sm:p-8 glow-purple"
+    class="login-card relative z-10 w-full max-w-md p-6 sm:p-8"
   >
     <div class="mb-4 flex justify-center">
       <Logo size={48} class="rounded-xl glow-purple" />
     </div>
     <p class="section-label mb-2 text-center">Seguridad</p>
-    <h1 class="text-center text-xl font-semibold text-[var(--color-text)] sm:text-2xl">
+    <h1 class="text-center text-2xl font-medium tracking-tight text-[var(--color-text)] sm:text-3xl">
       Cambia tu contraseña temporal
     </h1>
     <p class="mt-2 text-sm text-[var(--color-muted)]">

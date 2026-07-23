@@ -3,6 +3,7 @@ import {
   billingByCompany,
   canAccessCompany,
   companiesForUser,
+  companiesVisibleToUser,
   filterByCompanyId,
   pickDefaultCompanyId,
   seedCompanies,
@@ -28,6 +29,20 @@ describe("company access", () => {
     expect(pickDefaultCompanyId(adminCos)).toBe(1);
     expect(pickDefaultCompanyId(adminCos, 2)).toBe(2);
     expect(pickDefaultCompanyId(adminCos, 99)).toBe(1);
+  });
+
+  it("master keeps assigned companies until explicitly expanding all tenants", () => {
+    const assigned = companiesVisibleToUser(2, members, companies, {
+      isMaster: true,
+      includeAll: false,
+    });
+    const expanded = companiesVisibleToUser(2, members, companies, {
+      isMaster: true,
+      includeAll: true,
+    });
+    expect(assigned.map((company) => company.code)).toEqual(["SHOP"]);
+    expect(expanded.map((company) => company.code).sort()).toEqual(["DEV", "SHOP"]);
+    expect(canAccessCompany(2, 2, members, true)).toBe(true);
   });
 });
 

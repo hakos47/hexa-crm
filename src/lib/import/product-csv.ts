@@ -16,6 +16,13 @@ export const PRODUCT_CSV_HEADERS = [
   "cost_eur",
   "price_eur",
   "vat_rate",
+  "supplier_name",
+  "supplier_contact",
+  "supplier_email",
+  "supplier_phone",
+  "fulfillment_mode",
+  "stock_location",
+  "condition_code",
   "active",
 ] as const;
 
@@ -111,6 +118,20 @@ const HEADER_ALIASES: Record<string, (typeof PRODUCT_CSV_HEADERS)[number]> = {
   vat_rate: "vat_rate",
   iva: "vat_rate",
   tipo_iva: "vat_rate",
+  supplier_name: "supplier_name",
+  proveedor: "supplier_name",
+  supplier_contact: "supplier_contact",
+  contacto_proveedor: "supplier_contact",
+  supplier_email: "supplier_email",
+  email_proveedor: "supplier_email",
+  supplier_phone: "supplier_phone",
+  telefono_proveedor: "supplier_phone",
+  fulfillment_mode: "fulfillment_mode",
+  abastecimiento: "fulfillment_mode",
+  stock_location: "stock_location",
+  ubicacion_stock: "stock_location",
+  condition_code: "condition_code",
+  condicion: "condition_code",
   active: "active",
   activo: "active",
 };
@@ -257,6 +278,13 @@ export function parseProductCsv(
       cost_cents: cost,
       price_cents: price,
       vat_rate,
+      supplier_name: get("supplier_name"),
+      supplier_contact: get("supplier_contact"),
+      supplier_email: get("supplier_email"),
+      supplier_phone: get("supplier_phone"),
+      fulfillment_mode: (get("fulfillment_mode").trim() || "own_stock") as ProductInput["fulfillment_mode"],
+      stock_location: get("stock_location") || "Almacén principal",
+      condition_code: (get("condition_code").trim() || "used") as ProductInput["condition_code"],
       active: parseActive(get("active")),
     });
   }
@@ -283,6 +311,13 @@ export function productsToCsv(products: Product[]): string {
     (p.cost_cents / 100).toFixed(2),
     (p.price_cents / 100).toFixed(2),
     p.vat_rate,
+    p.supplier_name ?? "",
+    p.supplier_contact ?? "",
+    p.supplier_email ?? "",
+    p.supplier_phone ?? "",
+    p.fulfillment_mode ?? "own_stock",
+    p.stock_location ?? "Almacén principal",
+    p.condition_code ?? "used",
     p.active ? "1" : "0",
   ]);
   return toCsv([header, ...body]);
@@ -291,6 +326,6 @@ export function productsToCsv(products: Product[]): string {
 export function productCsvTemplate(): string {
   return toCsv([
     [...PRODUCT_CSV_HEADERS],
-    ["DEMO-001", "Producto ejemplo", "Descripción", "General", "10", "2", "1.00", "2.42", "21", "1"],
+    ["DEMO-001", "Producto ejemplo", "Descripción", "General", "10", "2", "1.00", "2.42", "21", "Proveedor demo", "Pedidos", "pedidos@proveedor.example", "", "own_stock", "Almacén principal", "new", "1"],
   ]);
 }

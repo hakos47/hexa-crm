@@ -16,15 +16,15 @@ Los hooks **no** protegen el remoto. Hace falta un **ruleset** o branch protecti
 
 Quien tenga permisos **admin** en `HEXA-NIX/hexa-crm` debe configurar:
 
-1. **Settings → Rules → Rulesets → New** (o editar `main-gpt` / `main-protection`)
-2. **Target branches:** `refs/heads/main` (include, no vacío)
+1. **Settings → Rules → Rulesets → editar `main-gpt`**
+2. **Target branches:** rama por defecto (`~DEFAULT_BRANCH`, que resuelve a `main`); nunca un include vacío.
 3. **Rules:**
    - Restrict deletions
    - Block force pushes (`non_fast_forward`)
    - Restrict updates (solo vía PR)
    - Require a pull request before merging
      - Required approvals: ≥ 1
-     - Allowed merge methods: **squash** (y opcionalmente merge)
+     - Allowed merge methods: **squash**
    - Require status checks to pass
      - Required check: **`quality`**
      - Require branches to be up to date before merging: **on**
@@ -36,7 +36,7 @@ Quien tenga permisos **admin** en `HEXA-NIX/hexa-crm` debe configurar:
 [ ] Push directo a main → rechazado por GitHub
 [ ] PR con quality failed → no se puede fusionar
 [ ] PR con quality success + aprobación → squash merge OK
-[ ] Este documento + ruleset con include refs/heads/main
+[ ] Este documento + ruleset con include ~DEFAULT_BRANCH
 ```
 
 ### Comprobación vía API (admin)
@@ -44,17 +44,16 @@ Quien tenga permisos **admin** en `HEXA-NIX/hexa-crm` debe configurar:
 ```bash
 gh api repos/HEXA-NIX/hexa-crm/rulesets
 gh api repos/HEXA-NIX/hexa-crm/branches/main --jq .protected
-# Esperado: protected=true y ruleset con include ["refs/heads/main"]
+# Esperado: protected=true y ruleset con include ["~DEFAULT_BRANCH"]
 ```
 
-> Nota (2026-07-18): el token de colaborador `push` **no** puede actualizar rulesets (HTTP 404).
-> Un admin de la org HEXA-NIX debe aplicar el ruleset anterior una vez.
+El ruleset se gestiona como configuración de repositorio y debe mantenerse activo con el
+check exacto `quality` de `.github/workflows/ci.yml`.
 
 ## Flujo de entrega
 
 ```
-feat/*  →  PR a dev  →  quality verde  →  merge a dev
-dev     →  PR a main →  quality verde + review humana → squash merge
+feat/*  → PR a main → quality verde + review humana → squash merge
 ```
 
 Ver también `AGENTS.md`.

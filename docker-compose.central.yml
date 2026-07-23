@@ -1,0 +1,36 @@
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: hexa_crm
+      POSTGRES_USER: hexa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set outside the repository}
+    # PostgreSQL 18 stores the cluster under a versioned subdirectory.
+    volumes: [hexa_pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hexa -d hexa_crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build: .
+    environment:
+      DATABASE_URL: ${HEXA_API_DATABASE_URL:-postgresql://hexa:${POSTGRES_PASSWORD}@db:5432/hexa_crm}
+      HOST: 0.0.0.0
+      PORT: 3000
+      HEXA_CENTRAL_MODE: "1"
+      HEXA_SERVICE_KEYS: ${HEXA_SERVICE_KEYS:-[]}
+      HEXA_MIGRATION_TOKEN: ${HEXA_MIGRATION_TOKEN:-}
+      HEXA_OLLAMA_URL: ${HEXA_OLLAMA_URL:-http://ollama:11434}
+      HEXA_EMBEDDING_MODEL: ${HEXA_EMBEDDING_MODEL:-nomic-embed-text}
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["${HEXA_API_PORT:-3001}:3000"]
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["semantic"]
+    volumes: [hexa_ollama:/root/.ollama]
+    # It deliberately has no host port: API and model stay on the Incus private network.
+volumes:
+  hexa_pgdata:
+  hexa_ollama:

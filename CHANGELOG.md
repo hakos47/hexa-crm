@@ -10,19 +10,51 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
+
+- Módulo multiempresa Trabajo (fase 1): bandeja persistente y categorizada (`/trabajo`), migración browser store v6, esquema e índices PostgreSQL con RLS por tenant, captura de avisos desde el Dashboard y flag centralizado `supportsWorkManagement()`.
+
+- Gestión de plugins por tenant en Ajustes, con activación y configuración independientes por empresa.
+- Plugin de conexión PostgreSQL externa mediante referencias seguras a variables de entorno.
+- Plugin Stripe MCP para el asistente, con lista cerrada de herramientas, auditoría y confirmación humana obligatoria para escrituras.
+- Perfil Maestro con vista normal de empresas asignadas y despliegue explícito y autorizado de todos los tenants.
+- Selector de proveedores guardados al crear o editar artículos, con alta rápida sin perder el formulario y conservación de proveedores históricos.
+- Landing pública editorial y hero original para presentar el CRM antes del acceso.
 - Shell: accesos rápidos con deep-link `?nuevo=1` (producto, cliente, caja, TPV) (#12).
 - **Onboarding guiado** 1ª sesión: tienda → producto → CTA primera venta; se puede saltar (#11).
 - **Cobertura de stock** (~días a ritmo de 14 d) en inventario y alertas del dashboard (#22).
+- Tauri/SQLite: `return_sale_lines` con migración de devoluciones parciales, stock y caja netos (#24).
+- Documentado el contrato de paridad RPC/Tauri para ventas y devoluciones (#24).
+- Carga diferida de `AiDrawer` y `marked`: el shell no descarga IA antes de abrirla (#20).
+- Bloqueo de sesión por inactividad configurable (15 min por defecto; 0 lo desactiva) y ajustes restringidos por rol (#21).
+- Recordatorio de copia en dashboard, fecha persistente y validación de checksum antes de restaurar en modo local (#19).
+- Modo claro persistente, tokens de contraste, movimiento reducido y guía del design system (#18).
+- Vista local de reposición con cálculo por ventas, cantidades editables y CSV para proveedor (#16).
+- TPV express con hasta ocho favoritos persistentes, chips táctiles y atajos F2/Esc (#15).
+- Ficha de cliente con valor neto, frecuencia, última compra, segmento e inicio de venta preseleccionado (#17).
+- Dashboard con deltas diarios, tendencia de siete días y alertas enlazadas (#13).
+- Copiloto local con herramientas de ventas, stock y reposición basadas en datos reales (#14).
+- Base de API central v1 con OpenAPI, health/readiness y receta PostgreSQL 18 + pgvector (#26).
+- Índice semántico privado por tenant, sin clientes ni ventas, preparado para embeddings locales (#32).
+- Catálogo central con estado de publicación y metadatos de producto para el tenant Meiga (#28).
+- El despliegue central ya no inserta datos demo al migrar (#26).
 
 ### Changed
+- Cabecera autenticada adaptada al lenguaje editorial de la landing: contexto de área, selector de empresa custom, identidad de sesión y acciones responsive.
+- Rediseño editorial completo del área autenticada: Pulso, Inventario, TPV e historial, Caja, Clientes, Impuestos y Ajustes comparten la jerarquía y estética de la landing.
+- Onboarding, cambio forzado de contraseña, modales, estados vacíos, toasts y asistente IA se alinean con el mismo sistema visual y responsive.
+- Rediseño integral del shell, navegación, login, tarjetas y sistema visual inspirado en una experiencia retail editorial.
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).
 - Navegación en **español de comercio** (#12).
 - Naming comercial **Hexa** + tagline «Asistente de tienda · IA local opcional» en login/shell (#23). Package npm sigue `hexa-crm`.
+- CI queda orientado a `main`; la protección documentada exige squash, revisión y el check `quality` (#1).
+
+### Fixed
+- El selector de empresa de la cabecera permanece por encima del contenido y permite pulsar todas las opciones del desplegable.
 
 ### Pendiente / backlog
 - Dashboard de mando completo (#13) y copiloto IA con tools (#14)
 - CRM valor cliente (#17), TPV favoritos (#15), reposición sugerida (#16)
-- Settings por empresa (M1b); Parity Tauri returns (#24)
+- Settings por empresa (M1b)
 - Design system light (#18); idle timeout (#21)
 
 

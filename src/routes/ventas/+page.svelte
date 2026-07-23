@@ -14,6 +14,7 @@
   import { showToast } from "$lib/stores/ui";
   import { resolveQuickAdd } from "$lib/pos/quick-add";
   import { downloadCsv, salesToCsv } from "$lib/export/csv";
+  import { MAX_POS_FAVORITES, normalizeFavoriteIds, toggleFavoriteId } from "$lib/pos/favorites";
 
   let products = $state<Product[]>([]);
   let customers = $state<Customer[]>([]);
@@ -29,6 +30,8 @@
   let loading = $state(true);
   let submitting = $state(false);
   let selectedSale = $state<Sale | null>(null);
+  let favoriteIds = $state<number[]>([]);
+  let searchInput: HTMLInputElement | undefined = $state();
 
   const filteredProducts = $derived(
     products.filter(
@@ -38,6 +41,11 @@
         (p.name.toLowerCase().includes(productQuery.toLowerCase()) ||
           p.sku.toLowerCase().includes(productQuery.toLowerCase()))
     )
+  );
+  const favoriteProducts = $derived(
+    favoriteIds
+      .map((id) => products.find((p) => p.id === id))
+      .filter((p): p is Product => !!p && p.active && p.stock > 0),
   );
 
   const discountPlan = $derived(
@@ -81,13 +89,48 @@
     }
   }
 
-  onMount(async () => {
+  async function initializeTpv() {
+    try {
+      favoriteIds = normalizeFavoriteIds(JSON.parse(localStorage.getItem("hexa-crm-pos-favorites-v1") || "[]"));
+    } catch {
+      favoriteIds = [];
+    }
     await load();
     // Acceso rápido "Nueva venta": forzar pestaña TPV
     if ($page.url.searchParams.get("nuevo") === "1") {
       tab = "tpv";
     }
+    const presetCustomerId = Number($page.url.searchParams.get("customerId"));
+    if (presetCustomerId && customers.some((customer) => customer.id === presetCustomerId)) {
+      customerId = String(presetCustomerId);
+    }
+  }
+
+  onMount(() => {
+    void initializeTpv();
+    const onShortcut = (event: KeyboardEvent) => {
+      if (event.key === "F2") {
+        event.preventDefault();
+        tab = "tpv";
+        queueMicrotask(() => searchInput?.focus());
+      } else if (event.key === "Escape" && tab === "tpv" && productQuery) {
+        productQuery = "";
+        searchInput?.focus();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
   });
+
+  function toggleFavorite(productId: number) {
+    const next = toggleFavoriteId(favoriteIds, productId);
+    if (next.length === favoriteIds.length && !favoriteIds.includes(productId)) {
+      showToast(`Puedes fijar hasta ${MAX_POS_FAVORITES} favoritos`, "info");
+      return;
+    }
+    favoriteIds = next;
+    localStorage.setItem("hexa-crm-pos-favorites-v1", JSON.stringify(next));
+  }
 
   function addToCart(p: Product) {
     const existing = cart.find((c) => c.product.id === p.id);
@@ -312,7 +355,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap items-center gap-2">
+<section class="sales-page">
+<div class="sales-intro">
+  <p class="workspace-index">03 / VENTAS</p>
+  <div class="sales-intro-row">
+    <div><h2>El mostrador,<br /><em>en calma.</em></h2><p>Cobra con rapidez. Todo lo demás queda en orden.</p></div>
+    <p class="sales-shortcut">F2 <span>buscar</span> · ESC <span>limpiar</span></p>
+  </div>
+</div>
+
+<div class="sales-switcher mb-5 flex flex-wrap items-center gap-2">
   <Button variant={tab === "tpv" ? "primary" : "secondary"} onclick={() => (tab = "tpv")}>
     TPV
   </Button>
@@ -327,30 +379,61 @@
 {#if loading}
   <div class="skeleton h-72"></div>
 {:else if tab === "tpv"}
-  <div class="grid grid-cols-1 gap-4 xl:grid-cols-5">
-    <Card class="min-w-0 xl:col-span-3" lift={false}>
+  <div class="pos-stage grid grid-cols-1 gap-4 xl:grid-cols-5">
+    <Card class="catalogue-stage min-w-0 xl:col-span-3" lift={false}>
+      <div class="pos-stage-heading"><p class="section-label">Catálogo disponible</p><span>{filteredProducts.length} referencias</span></div>
+      {#if favoriteProducts.length}
+        <div class="mb-3" data-pos-favorites>
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <p class="section-label !normal-case !tracking-wide">Favoritos</p>
+            <span class="text-[11px] text-[var(--color-muted-dim)]">1 toque para añadir</span>
+          </div>
+          <div class="flex gap-2 overflow-x-auto pb-1">
+            {#each favoriteProducts as p (p.id)}
+              <button
+                class="min-h-11 min-w-32 shrink-0 rounded-xl border border-purple-400/30 bg-purple-500/10 px-3 py-2 text-left transition hover:bg-purple-500/20"
+                onclick={() => addToCart(p)}
+                title={`Añadir ${p.name}`}
+              >
+                <p class="max-w-32 truncate text-sm font-medium text-[var(--color-text)]">{p.name}</p>
+                <p class="mt-0.5 text-xs tabular text-radiant">{formatEUR(p.price_cents)}</p>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <input
+        bind:this={searchInput}
         bind:value={productQuery}
-        placeholder="Buscar o escanear SKU… (Enter)"
+        placeholder="Buscar o escanear SKU… (F2 / Enter)"
         class="field mb-1 w-full text-sm"
         onkeydown={onSearchKeydown}
       />
       <p class="mb-3 text-[11px] text-[var(--color-muted-dim)]">
-        Enter = añadir por SKU exacto o única coincidencia (estilo pistola código de barras).
+        F2 = buscar · Esc = limpiar búsqueda · Enter = añadir por SKU exacto o única coincidencia.
       </p>
-      <div class="grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
+      <div class="pos-products grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
         {#each filteredProducts as p}
-          <button
-            class="rounded-xl border border-[var(--color-border)] bg-black/20 p-3 text-left transition hover:border-purple-400/35 hover:bg-purple-500/10"
-            onclick={() => addToCart(p)}
+          <div
+            class="pos-product rounded-xl border border-[var(--color-border)] p-3 text-left transition"
           >
-            <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+            <div class="flex items-start justify-between gap-2">
+              <button class="min-h-11 min-w-0 flex-1 text-left" onclick={() => addToCart(p)}>
+                <p class="font-medium text-[var(--color-text)]">{p.name}</p>
+              </button>
+              <button
+                class="min-h-11 min-w-11 rounded-lg border border-[var(--color-border)] text-lg text-[var(--color-purple)] hover:bg-purple-500/10"
+                onclick={() => toggleFavorite(p.id)}
+                aria-label={favoriteIds.includes(p.id) ? `Quitar ${p.name} de favoritos` : `Fijar ${p.name} como favorito`}
+                title={favoriteIds.includes(p.id) ? "Quitar favorito" : "Fijar favorito"}
+              >{favoriteIds.includes(p.id) ? "★" : "☆"}</button>
+            </div>
             <div class="mt-1 flex flex-wrap items-center justify-between gap-1 text-xs text-[var(--color-muted-dim)]">
               <span class="break-all">{p.sku} · stock {p.stock}</span>
               <span class="tabular text-radiant">{formatEUR(p.price_cents)}</span>
             </div>
             <Badge tone="vat">{p.vat_rate}% IVA</Badge>
-          </button>
+          </div>
         {:else}
           <p class="col-span-full py-8 text-center text-sm text-[var(--color-muted-dim)]">
             No hay productos con stock.
@@ -359,14 +442,14 @@
       </div>
     </Card>
 
-    <Card class="min-w-0 xl:col-span-2" lift={false}>
-      <h2 class="mb-3 font-semibold">Carrito</h2>
+    <Card class="cart-stage min-w-0 xl:col-span-2" lift={false}>
+      <div class="cart-stage-heading"><div><p class="section-label">Ticket actual</p><h2>Carrito</h2></div><span>{cart.reduce((sum, line) => sum + line.qty, 0)} uds.</span></div>
       {#if cart.length === 0}
         <EmptyState title="Carrito vacío" description="Pulsa un producto para añadirlo." />
       {:else}
-        <ul class="mb-3 max-h-56 space-y-2 overflow-y-auto">
+        <ul class="cart-lines mb-3 max-h-56 space-y-2 overflow-y-auto">
           {#each cart as c, i}
-            <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">
+            <li class="cart-line rounded-xl px-3 py-2 text-sm">
               <div class="flex flex-wrap items-center gap-2">
                 <div class="min-w-0 flex-1 basis-[min(100%,10rem)]">
                   <p class="truncate font-medium">{c.product.name}</p>
@@ -433,7 +516,7 @@
           ]}
         />
 
-        <div class="mb-3 space-y-1 rounded-xl border border-[var(--color-border)] bg-black/30 p-3 text-sm">
+        <div class="cart-totals mb-3 space-y-1 rounded-xl p-3 text-sm">
           {#if totalDiscountCents > 0}
             <div class="flex justify-between gap-2 text-amber-200/90">
               <span>Descuentos (línea + carrito)</span>
@@ -462,15 +545,15 @@
           </div>
         </div>
 
-        <Button class="w-full" disabled={submitting} onclick={checkout}>
+        <Button class="min-h-11 w-full" disabled={submitting} onclick={checkout}>
           {submitting ? "Procesando…" : "Cobrar y registrar"}
         </Button>
       {/if}
     </Card>
   </div>
 {:else}
-  <div class="grid grid-cols-1 gap-4 xl:grid-cols-5">
-    <Card class="min-w-0 overflow-hidden p-0 xl:col-span-3" lift={false}>
+  <div class="sales-history grid grid-cols-1 gap-4 xl:grid-cols-5">
+    <Card class="sales-list min-w-0 overflow-hidden p-0 xl:col-span-3" lift={false}>
       {#if sales.length === 0}
         <div class="p-4">
           <EmptyState title="Sin ventas" description="Cuando cobres un ticket aparecerá aquí." />
@@ -525,7 +608,7 @@
       {/if}
     </Card>
 
-    <Card class="min-w-0 xl:col-span-2" lift={false}>
+    <Card class="sale-detail min-w-0 xl:col-span-2" lift={false}>
       {#if !selectedSale}
         <p class="text-sm text-[var(--color-muted-dim)]">
           Selecciona un ticket para ver el desglose de IVA.
@@ -637,3 +720,4 @@
     </Card>
   </div>
 {/if}
+</section>

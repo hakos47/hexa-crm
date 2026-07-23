@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
-  import type { DashboardStats, Sale } from "$lib/types";
+  import type { DashboardStats, Sale, Settings } from "$lib/types";
   import { formatEUR } from "$lib/money";
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -10,17 +10,45 @@
   import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
   import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
   import { isOnboardingDone } from "$lib/onboarding/state";
+  import { backupAgeDays, needsBackupReminder } from "$lib/backup/backup-status";
+  import { dashboardHealth } from "$lib/dashboard/health";
+  import { session } from "$lib/stores/session";
 
   let stats = $state<DashboardStats | null>(null);
   let sales = $state<Sale[]>([]);
   let sold14d = $state<Record<number, number>>({});
   let loading = $state(true);
   let onboardingPending = $state(false);
+  let settings = $state<Settings | null>(null);
+  let centralSynchronizedAt = $state<string | null>(null);
+
+  let alertTasks = $state<Record<string, number>>({});
 
   onMount(async () => {
     try {
       onboardingPending = !isOnboardingDone();
-      [stats, sales] = await Promise.all([api.dashboardStats(), api.listSales()]);
+      [stats, sales, settings] = await Promise.all([
+        api.dashboardStats(),
+        api.listSales(),
+        api.getSettings(),
+      ]);
+      centralSynchronizedAt = $session.remote ? new Date().toISOString() : null;
+
+      if (api.supportsWorkManagement()) {
+        try {
+          const workItems = await api.listWorkItems();
+          const taskMap: Record<string, number> = {};
+          for (const item of workItems) {
+            if (item.source_type === "dashboard_alert" && item.source_key && item.status !== "archived") {
+              taskMap[item.source_key] = item.id;
+            }
+          }
+          alertTasks = taskMap;
+        } catch {
+          /* ignore */
+        }
+      }
+
       // Build sold map for low-stock cover hints (last 14d, cap fetches)
       const cutoff = Date.now() - 14 * 86400000;
       const recentSales = sales
@@ -58,7 +86,27 @@
     }
   });
 
+  async function handleCreateTask(alert: { id: string; title: string; detail: string; href: string }) {
+    try {
+      const task = await api.captureDashboardAlert({
+        alertId: alert.id,
+        title: alert.title,
+        detail: alert.detail,
+        href: alert.href,
+      });
+      showToast("Tarea creada en Trabajo");
+      alertTasks = { ...alertTasks, [alert.id]: task.id };
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al crear tarea", "err");
+    }
+  }
+
   const recent = $derived(sales.slice(0, 6));
+  const showBackupReminder = $derived(needsBackupReminder(settings?.last_backup_at));
+  const backupDays = $derived(backupAgeDays(settings?.last_backup_at));
+  const health = $derived(dashboardHealth(sales, stats?.low_stock ?? [], showBackupReminder));
+  const trendMax = $derived(Math.max(...health.trend.map((day) => day.cents), 1));
+  const deltaLabel = (delta: number | null) => delta === null ? "Sin referencia" : `${delta > 0 ? "+" : ""}${delta}% vs ayer`;
 </script>
 
 {#if loading}
@@ -68,6 +116,19 @@
     {/each}
   </div>
 {:else if stats}
+  <section class="pulse-page">
+    <div class="workspace-intro">
+      <p class="workspace-index">01 / PULSO DEL NEGOCIO</p>
+      <div class="workspace-intro-row">
+        <h2>Lo que importa,<br /><em>ahora.</em></h2>
+        <p>Una lectura breve de ventas, caja y prioridades para abrir el día con criterio.</p>
+      </div>
+    </div>
+  {#if $session.remote}
+    <p class="mb-4 rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100" data-central-status>
+      CRM central · tenant {$session.remote.tenantCode} · datos actualizados {centralSynchronizedAt ? new Date(centralSynchronizedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ahora"}. Sin conexión, las operaciones no se guardan localmente.
+    </p>
+  {/if}
   {#if onboardingPending}
     <Card class="mb-4 border border-purple-400/30 bg-purple-500/10" lift={false} data-onboarding-hint>
       <p class="text-sm font-medium text-[var(--color-purple-bright)]">Puesta en marcha pendiente</p>
@@ -80,13 +141,30 @@
       </a>
     </Card>
   {/if}
+  {#if showBackupReminder}
+    <Card class="mb-4 border border-amber-400/30 bg-amber-500/10" lift={false} data-backup-reminder>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-amber-100">
+            {backupDays === null ? "Aún no hay una copia de seguridad" : `La última copia tiene ${backupDays} días`}
+          </p>
+          <p class="mt-1 text-xs text-amber-100/75">
+            Guarda un JSON local antes de continuar. No se envía nada a la nube.
+          </p>
+        </div>
+        <a href="/ajustes" class="text-sm font-medium text-amber-100 underline-offset-2 hover:underline">
+          Hacer copia →
+        </a>
+      </div>
+    </Card>
+  {/if}
   <!-- Resumen KPIs -->
-  <p class="section-label mb-3">Resumen</p>
-  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <p class="section-label mb-3">El día en cifras</p>
+  <div class="pulse-metrics grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <KpiCard
       label="Ventas hoy"
       value={formatEUR(stats.sales_today_cents)}
-      hint="{stats.sales_today_count} ticket(s)"
+      hint={`${stats.sales_today_count} ticket(s) · ${deltaLabel(health.sales_delta_percent)}`}
       icon="◎"
       accent="emerald"
     />
@@ -113,7 +191,76 @@
     />
   </div>
 
-  <div class="mt-8 grid gap-4 lg:grid-cols-3">
+  <div class="pulse-story mt-4 grid gap-4 lg:grid-cols-3" data-dashboard-health>
+    <Card class="pulse-trend lg:col-span-2" lift={false}>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="section-label !normal-case !tracking-wide !text-sm">Pulso de hoy</h2>
+          <p class="mt-1 text-sm text-[var(--color-muted)]">Ticket medio {formatEUR(health.average_ticket_cents)} · {deltaLabel(health.tickets_delta_percent)} en tickets</p>
+        </div>
+        <span class="text-xs text-[var(--color-muted-dim)]">Últimos 7 días</span>
+      </div>
+      <div class="mt-5 flex h-24 items-end gap-2" aria-label="Tendencia de ventas de los últimos siete días">
+        {#each health.trend as day}
+          <div class="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <span class="text-[10px] tabular text-[var(--color-muted-dim)]">{day.cents ? formatEUR(day.cents) : "—"}</span>
+            <div class="w-full rounded-t bg-gradient-to-t from-purple-600 to-violet-300/90 transition-[height] duration-300" style={`height: ${Math.max(6, Math.round((day.cents / trendMax) * 64))}px`}></div>
+            <span class="text-[10px] text-[var(--color-muted-dim)]">{new Date(`${day.date}T12:00:00`).toLocaleDateString("es-ES", { weekday: "narrow" })}</span>
+          </div>
+        {/each}
+      </div>
+    </Card>
+    <Card class="pulse-attention" lift={false}>
+      <div class="mb-3 flex items-center justify-between"><h2 class="section-label !normal-case !tracking-wide !text-sm">Atención ahora</h2><Badge tone={health.alerts.length ? "warn" : "ok"}>{health.alerts.length || "OK"}</Badge></div>
+      {#if health.alerts.length}
+        <ul class="space-y-2">
+          {#each health.alerts as alert (alert.id)}
+            {@const taskId = alertTasks[alert.id]}
+            <li class="rounded-lg border border-[var(--color-border)] bg-black/20 p-2.5 transition hover:border-purple-400/35">
+              <div class="flex items-center justify-between gap-2">
+                <a href={alert.href} class="block flex-1 min-w-0">
+                  <p class="text-xs font-medium text-[var(--color-text)]">{alert.title}</p>
+                  <p class="mt-0.5 text-[11px] text-[var(--color-muted-dim)]">{alert.detail} →</p>
+                </a>
+                {#if api.supportsWorkManagement()}
+                  {#if taskId}
+                    <a
+                      href="/trabajo?item={taskId}"
+                      class="shrink-0 rounded px-2 py-1 text-xs font-medium bg-purple-500/20 text-purple-200 hover:bg-purple-500/30 border border-purple-400/20"
+                    >
+                      Ver tarea
+                    </a>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={() => handleCreateTask(alert)}
+                      class="shrink-0 rounded px-2 py-1 text-xs font-medium bg-purple-600/30 text-purple-200 hover:bg-purple-600/50 border border-purple-400/20"
+                    >
+                      Crear tarea
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {:else}
+        <p class="text-sm text-emerald-300">Todo bajo control. Sigue así.</p>
+      {/if}
+    </Card>
+  </div>
+
+  <Card class="pulse-ai-note mt-4" lift={false} data-dashboard-ai-slot>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="section-label !normal-case !tracking-wide !text-sm">Recomendación IA</h2>
+        <p class="mt-1 text-sm text-[var(--color-muted)]">Pregunta por el resumen de hoy, stock o prioridades. Si Ollama está apagado, el resto del CRM sigue disponible.</p>
+      </div>
+      <p class="pulse-ai-hint">El asistente vive en el sello flotante <span>↘</span></p>
+    </div>
+  </Card>
+
+  <div class="pulse-details mt-8 grid gap-4 lg:grid-cols-3">
     <!-- Stock alerts as pipeline-like cards -->
     <Card class="lg:col-span-1" lift={false}>
       <div class="mb-4 flex items-center justify-between">
@@ -134,7 +281,7 @@
             })}
             <li>
               <a
-                href="/inventario"
+                href="/inventario?reponer=1"
                 class="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-2.5 transition hover:border-purple-400/25 hover:bg-purple-500/10"
               >
                 <div class="min-w-0">
@@ -242,4 +389,5 @@
       </p>
     </Card>
   </div>
+  </section>
 {/if}

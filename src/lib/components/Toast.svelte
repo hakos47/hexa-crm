@@ -11,7 +11,7 @@
 
 {#if $toast}
   <div
-    class="fixed bottom-5 right-5 z-[60] max-w-sm rounded-xl border px-4 py-3 text-sm shadow-xl backdrop-blur {colors[$toast.type]}"
+    class="fixed bottom-24 right-5 z-[60] max-w-sm rounded-xl border px-4 py-3 text-sm shadow-xl backdrop-blur {colors[$toast.type]}"
     transition:fly={{ y: 16, duration: 200 }}
   >
     {$toast.message}

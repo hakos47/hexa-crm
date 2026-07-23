@@ -7,6 +7,18 @@ use rand::RngCore;
 use rusqlite::params;
 use tauri::State;
 
+type LoginRow = (
+    i64,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    i64,
+    Option<String>,
+);
+
 fn map_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuthUser> {
     Ok(AuthUser {
         id: row.get(0)?,
@@ -29,7 +41,10 @@ fn random_token() -> String {
     hex::encode(bytes)
 }
 
-pub fn require_session(conn: &rusqlite::Connection, token: &Option<String>) -> Result<AuthUser, String> {
+pub fn require_session(
+    conn: &rusqlite::Connection,
+    token: &Option<String>,
+) -> Result<AuthUser, String> {
     let token = token
         .as_ref()
         .filter(|t| !t.is_empty())
@@ -46,7 +61,10 @@ pub fn require_session(conn: &rusqlite::Connection, token: &Option<String>) -> R
     .map_err(|_| "Sesión inválida o expirada".to_string())
 }
 
-pub fn require_admin(conn: &rusqlite::Connection, token: &Option<String>) -> Result<AuthUser, String> {
+pub fn require_admin(
+    conn: &rusqlite::Connection,
+    token: &Option<String>,
+) -> Result<AuthUser, String> {
     let u = require_session(conn, token)?;
     if u.role != "admin" {
         return Err("Se requieren permisos de administrador".into());
@@ -65,20 +83,7 @@ pub fn login(
         .or(pin)
         .ok_or_else(|| "Usuario o contraseña incorrectos".to_string())?;
     let conn = db.lock();
-    let row: Result<
-        (
-            i64,
-            String,
-            String,
-            String,
-            i64,
-            String,
-            String,
-            i64,
-            Option<String>,
-        ),
-        _,
-    > = conn.query_row(
+    let row: Result<LoginRow, _> = conn.query_row(
         "SELECT id, username, display_name, role, active, created_at, pin_hash,
                 COALESCE(must_change_password, 0), temp_password_issued_at
          FROM users WHERE lower(username) = lower(?1) AND active = 1",
@@ -178,7 +183,11 @@ pub fn upsert_user(
     let conn = db.lock();
     require_admin(&conn, &token)?;
 
-    let role = if input.role == "admin" { "admin" } else { "cajero" };
+    let role = if input.role == "admin" {
+        "admin"
+    } else {
+        "cajero"
+    };
     let username = input.username.trim().to_lowercase();
     if username.is_empty() {
         return Err("Usuario obligatorio".into());
@@ -199,7 +208,9 @@ pub fn upsert_user(
                 )
                 .map_err(|e| e.to_string())?;
             let current_role: String = conn
-                .query_row("SELECT role FROM users WHERE id=?1", params![id], |r| r.get(0))
+                .query_row("SELECT role FROM users WHERE id=?1", params![id], |r| {
+                    r.get(0)
+                })
                 .map_err(|_| "Usuario no encontrado".to_string())?;
             if current_role == "admin" && other_admins == 0 {
                 return Err("Debe quedar al menos un administrador".into());
@@ -214,7 +225,9 @@ pub fn upsert_user(
                 )
                 .map_err(|e| e.to_string())?;
             let current_role: String = conn
-                .query_row("SELECT role FROM users WHERE id=?1", params![id], |r| r.get(0))
+                .query_row("SELECT role FROM users WHERE id=?1", params![id], |r| {
+                    r.get(0)
+                })
                 .map_err(|_| "Usuario no encontrado".to_string())?;
             if current_role == "admin" && other_admins == 0 {
                 return Err("No puedes desactivar el último administrador".into());
@@ -252,11 +265,7 @@ pub fn upsert_user(
         }
 
         let user = conn
-            .query_row(
-                &format!("{USER_SELECT} WHERE id=?1"),
-                params![id],
-                map_user,
-            )
+            .query_row(&format!("{USER_SELECT} WHERE id=?1"), params![id], map_user)
             .map_err(|e| e.to_string())?;
         Ok(CreateUserResult {
             user,
@@ -281,11 +290,7 @@ pub fn upsert_user(
         })?;
         let id = conn.last_insert_rowid();
         let user = conn
-            .query_row(
-                &format!("{USER_SELECT} WHERE id=?1"),
-                params![id],
-                map_user,
-            )
+            .query_row(&format!("{USER_SELECT} WHERE id=?1"), params![id], map_user)
             .map_err(|e| e.to_string())?;
         Ok(CreateUserResult {
             user,

@@ -22,7 +22,7 @@
 <svelte:window onkeydown={open ? onKey : undefined} />
 
 {#if open}
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="fixed inset-0 z-[90] flex items-center justify-center p-4">
     <button
       class="absolute inset-0 bg-black/60 backdrop-blur-sm"
       aria-label="Cerrar"
@@ -30,7 +30,7 @@
       transition:fade={{ duration: 150 }}
     ></button>
     <div
-      class="glass-strong relative z-10 w-full max-w-lg rounded-2xl border border-[var(--color-border-strong)] p-5 glow-purple"
+      class="modal-editorial glass-strong relative z-10 max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain border border-[var(--color-border-strong)] p-5"
       transition:scale={{ duration: 180, start: 0.96 }}
       role="dialog"
       aria-modal="true"

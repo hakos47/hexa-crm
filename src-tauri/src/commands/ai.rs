@@ -164,8 +164,7 @@ pub fn ai_chat(
         "Eres el asistente de la tienda \"{}\" en España. Responde en español, breve y práctico. \
 Precios en EUR con IVA incluido. Contexto actual (JSON compacto): {}. \
 No inventes datos fuera del contexto. Si falta info, dilo.",
-        settings.shop_name,
-        context
+        settings.shop_name, context
     );
 
     let mut payload_msgs = vec![json!({"role": "system", "content": system})];
@@ -253,12 +252,7 @@ fn extract_ollama_reply(data: &Value) -> String {
         .unwrap_or("")
         .trim();
     if !thinking.is_empty() {
-        if let Some(last) = thinking
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .last()
-        {
+        if let Some(last) = thinking.lines().map(str::trim).rfind(|l| !l.is_empty()) {
             if last.len() < 500 && !last.to_lowercase().starts_with("thinking") {
                 return last.to_string();
             }

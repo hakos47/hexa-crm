@@ -1,19 +1,19 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import type { HTMLAttributes } from "svelte/elements";
 
   let {
     class: className = "",
     lift = true,
     children,
     ...restProps
-  }: {
-    class?: string;
+  }: HTMLAttributes<HTMLDivElement> & {
     lift?: boolean;
     children: Snippet;
     [attribute: string]: unknown;
   } = $props();
 </script>
 
-<div class="glass rounded-2xl p-4 {lift ? 'card-lift' : ''} {className}" {...restProps}>
+<div {...restProps} class="glass crm-card rounded-2xl p-4 {lift ? 'card-lift' : ''} {className}">
   {@render children()}
 </div>

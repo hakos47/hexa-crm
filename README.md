@@ -108,6 +108,7 @@ npm run tauri:build  # empaquetado
 | [docs/MULTI_COMPANY_ANALYSIS.md](./docs/MULTI_COMPANY_ANALYSIS.md) | Multi-empresa (análisis; no implementado) |
 | [docs/BACKUP.md](./docs/BACKUP.md) | Copias y restauración |
 | [docs/BRANCH_PROTECTION.md](./docs/BRANCH_PROTECTION.md) | CI y protección de `main` |
+| [docs/CENTRAL_DEPLOYMENT.md](./docs/CENTRAL_DEPLOYMENT.md) | API central multi-tenant / Incus |
 | [ROADMAP.md](./ROADMAP.md) | Fases de producto |
 
 ## Principios

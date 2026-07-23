@@ -1,0 +1,153 @@
+openapi: 3.1.0
+info:
+  title: HEXA CRM Central API
+  version: 1.0.0-draft
+  description: API versionada para integraciones tenant aisladas. Las mutaciones usan firma de servicio e Idempotency-Key.
+servers:
+  - url: https://crm.example.invalid/api/v1
+paths:
+  /health:
+    get:
+      summary: Disponibilidad de API, base, migraciones y pgvector
+      responses:
+        '200': { description: Preparada }
+        '503': { description: API viva pero dependencia no preparada }
+  /products:
+    get:
+      summary: Feed paginado de catálogo publicado; nunca devuelve borradores, archivados ni otro tenant
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 100 } }
+      responses:
+        '200': { description: Página de productos }
+  /reservations:
+    post:
+      summary: Reserva atómica de stock
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Reserva creada }
+        '409': { description: Stock insuficiente o clave reutilizada con payload distinto }
+        '401': { description: Firma de servicio inválida }
+  /reservations/{id}:
+    delete:
+      summary: Cancela una reserva y libera stock una única vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Reserva cancelada o ya finalizada }
+        '404': { description: Reserva no visible para este tenant }
+  /reservations/expire:
+    post:
+      summary: Expira las reservas vencidas del tenant y libera el stock una única vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Lote de reservas expiradas }
+  /customers:
+    post:
+      summary: Crea o actualiza una ficha comercial desde identidad externa Meiga
+      security: [{ serviceHmac: [] }]
+      responses:
+        '200': { description: Cliente enlazado sin credenciales externas }
+  /orders:
+    post:
+      summary: Confirma una reserva como pedido sin descontar stock por segunda vez
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Pedido canónico creado }
+  /orders/{id}/sale:
+    post:
+      summary: Registra la venta de un pedido sin volver a descontar la reserva
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Venta canónica creada }
+  /semantic/documents:
+    post:
+      summary: Indexa un documento comercial permitido con Ollama local
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '201': { description: Documento indexado }
+        '503': { description: Ollama no disponible; CRM sigue operativo }
+  /semantic/search:
+    get:
+      summary: Búsqueda híbrida privada dentro del tenant
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Resultados trazables a su entidad origen }
+  /operator/login:
+    post:
+      summary: Inicia sesión de operador interno para un tenant concreto
+      responses:
+        '200': { description: Sesión temporal de operador }
+        '401': { description: Credenciales inválidas }
+  /operator/products:
+    get:
+      summary: Inventario visible al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+    post:
+      summary: Crea o actualiza inventario del tenant como operador administrador
+      security: [{ operatorBearer: [] }]
+  /operator/customers:
+    get:
+      summary: Clientes visibles al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+    post:
+      summary: Crea o actualiza un cliente del tenant como operador
+      security: [{ operatorBearer: [] }]
+  /operator/sales:
+    get:
+      summary: Ventas visibles al operador autenticado de su tenant
+      security: [{ operatorBearer: [] }]
+    post:
+      summary: Registra una venta atómica de operador
+      security: [{ operatorBearer: [] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+  /operator/dashboard:
+    get:
+      summary: KPIs operativos y alertas de stock del tenant del operador
+      security: [{ operatorBearer: [] }]
+  /orders:
+    get:
+      summary: Historial canónico de pedidos de un comprador externo del tenant
+      security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: external_customer_id, in: query, required: true, schema: { type: string } }
+    post:
+      summary: Confirma una reserva como pedido canónico
+      security: [{ serviceHmac: [] }]
+components:
+  securitySchemes:
+    serviceHmac:
+      type: apiKey
+      in: header
+      name: X-Hexa-Signature
+    operatorBearer:
+      type: http
+      scheme: bearer
+  responses:
+    Error:
+      description: Error normalizado
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, code, request_id]
+            properties:
+              error: { type: string }
+              code: { type: string }
+              request_id: { type: string }

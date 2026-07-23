@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import type { HTMLButtonAttributes } from "svelte/elements";
 
   type Variant = "primary" | "secondary" | "ghost" | "danger" | "ai";
 
@@ -11,22 +12,18 @@
     onclick,
     children,
     ...restProps
-  }: {
+  }: HTMLButtonAttributes & {
     variant?: Variant;
-    type?: "button" | "submit" | "reset";
-    disabled?: boolean;
-    class?: string;
-    onclick?: (e: MouseEvent) => void;
     children: Snippet;
     [attribute: string]: unknown;
   } = $props();
 
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-45 disabled:pointer-events-none active:scale-[0.98]";
+    "inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-all duration-200 disabled:opacity-45 disabled:pointer-events-none active:scale-[0.98]";
 
   const styles: Record<Variant, string> = {
     primary:
-      "bg-gradient-to-r from-violet-600 to-purple-500 text-white hover:from-violet-500 hover:to-purple-400 shadow-[0_0_28px_rgba(168,85,247,0.35)]",
+      "bg-[var(--color-purple)] text-[#17111f] hover:bg-[var(--color-purple-bright)] shadow-[0_10px_30px_rgba(184,153,237,0.18)]",
     secondary:
       "bg-white/[0.03] text-[var(--color-text)] border border-[var(--color-border)] hover:bg-purple-500/10 hover:border-purple-400/30",
     ghost: "text-[var(--color-muted)] hover:bg-purple-500/10 hover:text-[var(--color-purple-bright)]",
@@ -35,6 +32,6 @@
   };
 </script>
 
-<button {type} {disabled} class="{base} {styles[variant]} {className}" {onclick} {...restProps}>
+<button {...restProps} {type} {disabled} class="{base} {styles[variant]} {className}" {onclick}>
   {@render children()}
 </button>

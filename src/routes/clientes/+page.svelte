@@ -2,18 +2,22 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api/client";
-  import type { Customer } from "$lib/types";
+  import type { Customer, Sale } from "$lib/types";
   import Button from "$lib/components/Button.svelte";
   import Card from "$lib/components/Card.svelte";
   import Input from "$lib/components/Input.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { customerMetrics } from "$lib/customers/metrics";
+  import { formatEUR } from "$lib/money";
+  import Badge from "$lib/components/Badge.svelte";
 
   let customers = $state<Customer[]>([]);
   let query = $state("");
   let loading = $state(true);
   let open = $state(false);
+  let sales = $state<Sale[]>([]);
 
   const filtered = $derived(
     customers.filter((c) => {
@@ -27,13 +31,14 @@
       );
     })
   );
+  const metrics = $derived(customerMetrics(customers, sales));
   let editing = $state<Customer | null>(null);
   let form = $state({ name: "", email: "", phone: "", nif: "", notes: "" });
 
   async function load() {
     loading = true;
     try {
-      customers = await api.listCustomers();
+      [customers, sales] = await Promise.all([api.listCustomers(), api.listSales()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
     } finally {
@@ -85,7 +90,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap items-center gap-3">
+<section class="customers-page workspace-page">
+<div class="workspace-intro workspace-intro-compact">
+  <p class="workspace-index">05 / CLIENTES</p>
+  <div class="workspace-intro-row">
+    <h2>Personas, no<br /><em>solo tickets.</em></h2>
+    <p>Historial, valor y contexto para cuidar cada relación comercial.</p>
+  </div>
+</div>
+
+<div class="workspace-toolbar mb-5 flex flex-wrap items-center gap-3">
   <input
     bind:value={query}
     placeholder="Buscar nombre, email, teléfono o NIF…"
@@ -103,27 +117,46 @@
 {:else if filtered.length === 0}
   <EmptyState title="Sin resultados" description="Prueba otro término de búsqueda." />
 {:else}
-  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+  <div class="customer-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
     {#each filtered as c}
+      {@const metric = metrics[c.id]}
+      {@const recentSales = sales.filter((sale) => sale.customer_id === c.id && sale.status !== "cancelled").sort((a, b) => b.sold_at.localeCompare(a.sold_at)).slice(0, 3)}
       <Card>
         <div class="flex items-start justify-between gap-2">
           <div>
-            <h3 class="font-semibold text-slate-100">{c.name}</h3>
+            <h3 class="font-semibold text-[var(--color-text)]">{c.name}</h3>
             {#if c.nif}
-              <p class="text-xs text-slate-500">NIF {c.nif}</p>
+              <p class="text-xs text-[var(--color-muted-dim)]">NIF {c.nif}</p>
             {/if}
           </div>
           <Button variant="ghost" class="!px-2 !py-1 text-xs" onclick={() => openEdit(c)}>Editar</Button>
         </div>
-        <div class="mt-3 space-y-1 text-sm text-slate-400">
+        <div class="mt-3 space-y-1 text-sm text-[var(--color-muted)]">
           {#if c.email}<p>{c.email}</p>{/if}
           {#if c.phone}<p>{c.phone}</p>{/if}
-          {#if c.notes}<p class="text-xs text-slate-500">{c.notes}</p>{/if}
+          {#if c.notes}<p class="text-xs text-[var(--color-muted-dim)]">{c.notes}</p>{/if}
         </div>
+        <div class="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-[var(--color-border)] bg-black/20 p-2.5 text-xs">
+          <div><p class="text-[var(--color-muted-dim)]">Valor total</p><p class="mt-0.5 font-medium tabular text-[var(--color-text)]">{formatEUR(metric?.lifetime_cents ?? 0)}</p></div>
+          <div><p class="text-[var(--color-muted-dim)]">Última compra</p><p class="mt-0.5 text-[var(--color-text)]">{metric?.last_purchase_at ? new Date(metric.last_purchase_at).toLocaleDateString("es-ES") : "—"}</p></div>
+          <div><p class="text-[var(--color-muted-dim)]">Frecuencia</p><p class="mt-0.5 text-[var(--color-text)]">{metric?.purchase_count ?? 0} tickets</p></div>
+          <div class="flex items-end"><Badge tone={metric?.segment === "vip" ? "ai" : metric?.segment === "en_riesgo" ? "warn" : "ok"}>{metric?.segment?.replace("_", " ") ?? "nuevo"}</Badge></div>
+        </div>
+        {#if recentSales.length}
+          <div class="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-xs">
+            <p class="mb-1 text-[var(--color-muted-dim)]">Últimas compras</p>
+            {#each recentSales as sale (sale.id)}
+              <p class="flex justify-between gap-2 text-[var(--color-muted)]"><span>{new Date(sale.sold_at).toLocaleDateString("es-ES")}</span><span class="tabular">{formatEUR(sale.total_cents - (sale.refunded_cents ?? 0))}</span></p>
+            {/each}
+          </div>
+        {/if}
+        <a href={`/ventas?nuevo=1&customerId=${c.id}`} class="mt-3 inline-flex min-h-11 items-center text-sm font-medium text-radiant hover:underline">Nueva venta para este cliente →</a>
       </Card>
     {/each}
   </div>
 {/if}
+
+</section>
 
 <Modal {open} title={editing ? "Editar cliente" : "Nuevo cliente"} onclose={() => (open = false)}>
   <form

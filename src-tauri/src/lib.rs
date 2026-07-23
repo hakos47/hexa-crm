@@ -12,7 +12,7 @@ use commands::{
     customers::{list_customers, upsert_customer},
     products::{adjust_stock, list_products, upsert_product},
     reports::{dashboard_stats, vat_summary},
-    sales::{cancel_sale, create_sale, get_sale, list_sales},
+    sales::{cancel_sale, create_sale, get_sale, list_sales, return_sale_lines},
     settings::{get_settings, public_meta, reset_demo, update_settings},
 };
 use db::open_db;
@@ -50,6 +50,7 @@ pub fn run() {
             list_sales,
             get_sale,
             cancel_sale,
+            return_sale_lines,
             list_cash_movements,
             create_cash_movement,
             get_cash_balance,

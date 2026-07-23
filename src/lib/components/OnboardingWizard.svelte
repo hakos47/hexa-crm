@@ -117,14 +117,14 @@
   aria-labelledby="onboarding-title"
 >
   <div
-    class="glass-strong max-h-[min(90vh,40rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-[var(--color-border-strong)] p-6 shadow-2xl sm:p-8"
+    class="onboarding-editorial glass-strong max-h-[min(90vh,40rem)] w-full max-w-lg overflow-y-auto border border-[var(--color-border-strong)] p-6 shadow-2xl sm:p-8"
   >
     <div class="mb-6 text-center">
       <div class="mx-auto mb-3 flex justify-center">
         <Logo size={48} class="rounded-2xl glow-purple" />
       </div>
       <p class="section-label mb-1">Puesta en marcha</p>
-      <h1 id="onboarding-title" class="text-xl font-semibold text-[var(--color-text)]">
+      <h1 id="onboarding-title" class="editorial-serif text-3xl font-normal text-[var(--color-text)]">
         Bienvenido a {PRODUCT_DISPLAY_NAME}
       </h1>
       <p class="mt-1 text-sm text-[var(--color-muted)]">{PRODUCT_TAGLINE}</p>

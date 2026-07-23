@@ -12,6 +12,13 @@ pub struct Product {
     pub cost_cents: i64,
     pub price_cents: i64,
     pub vat_rate: i32,
+    pub supplier_name: String,
+    pub supplier_contact: String,
+    pub supplier_email: String,
+    pub supplier_phone: String,
+    pub fulfillment_mode: String,
+    pub stock_location: String,
+    pub condition_code: String,
     pub active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -29,6 +36,13 @@ pub struct ProductInput {
     pub cost_cents: i64,
     pub price_cents: i64,
     pub vat_rate: i32,
+    pub supplier_name: Option<String>,
+    pub supplier_contact: Option<String>,
+    pub supplier_email: Option<String>,
+    pub supplier_phone: Option<String>,
+    pub fulfillment_mode: Option<String>,
+    pub stock_location: Option<String>,
+    pub condition_code: Option<String>,
     pub active: Option<bool>,
 }
 
@@ -62,6 +76,12 @@ pub struct SaleLineInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReturnLineInput {
+    pub line_id: i64,
+    pub qty: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SaleLine {
     pub id: i64,
     pub sale_id: i64,
@@ -73,6 +93,8 @@ pub struct SaleLine {
     pub line_base_cents: i64,
     pub line_vat_cents: i64,
     pub line_total_cents: i64,
+    #[serde(default)]
+    pub returned_qty: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +109,8 @@ pub struct Sale {
     pub total_cents: i64,
     pub notes: String,
     pub status: String,
+    #[serde(default)]
+    pub refunded_cents: i64,
     pub lines: Option<Vec<SaleLine>>,
 }
 
@@ -146,6 +170,8 @@ pub struct Settings {
     pub ollama_model: String,
     pub ollama_url: String,
     pub default_vat: i32,
+    pub idle_timeout_minutes: i32,
+    pub last_backup_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

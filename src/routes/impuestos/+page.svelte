@@ -48,7 +48,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+<section class="tax-page workspace-page">
+<div class="workspace-intro workspace-intro-compact">
+  <p class="workspace-index">06 / IMPUESTOS</p>
+  <div class="workspace-intro-row">
+    <h2>Las cuentas,<br /><em>sin ruido.</em></h2>
+    <p>Una lectura interna del IVA repercutido, preparada para revisar y exportar.</p>
+  </div>
+</div>
+
+<div class="workspace-toolbar mb-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
   <label class="text-sm w-full sm:w-auto">
     <span class="mb-1 block text-[var(--color-muted)]">Desde</span>
     <input type="date" bind:value={range.from} class="field w-full sm:w-auto" />
@@ -57,12 +66,7 @@
     <span class="mb-1 block text-[var(--color-muted)]">Hasta</span>
     <input type="date" bind:value={range.to} class="field w-full sm:w-auto" />
   </label>
-  <button
-    class="w-full rounded-xl bg-gradient-to-r from-violet-600 to-purple-500 px-4 py-2 text-sm font-medium text-white sm:w-auto"
-    onclick={load}
-  >
-    Actualizar
-  </button>
+  <Button class="w-full sm:w-auto" onclick={load}>Actualizar</Button>
   <Button variant="secondary" class="w-full sm:w-auto" onclick={exportCsv}>Exportar CSV</Button>
 </div>
 
@@ -105,3 +109,5 @@
     </table>
   </Card>
 {/if}
+
+</section>

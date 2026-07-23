@@ -9,8 +9,17 @@
   import Badge from "$lib/components/Badge.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Select from "$lib/components/Select.svelte";
+  import PluginManager from "$lib/components/PluginManager.svelte";
   import { showToast } from "$lib/stores/ui";
-  import { currentUser, isAdmin, clearSession } from "$lib/stores/session";
+  import {
+    currentUser,
+    isAdmin,
+    clearSession,
+    setIdleTimeoutMinutes,
+  } from "$lib/stores/session";
+  import { normalizeIdleTimeoutMinutes } from "$lib/auth/idle-timeout";
+  import { parseBackupJson, type BackupEnvelope } from "$lib/backup/backup";
+  import { theme, toggleTheme } from "$lib/stores/theme";
   import { TEMP_PASSWORD_LENGTH } from "$lib/auth/password-policy";
   import {
     applyGitHubUpdate,
@@ -52,6 +61,8 @@
 
   let createdTempPassword = $state<string | null>(null);
   let tempModal = $state(false);
+  let restorePreview = $state<BackupEnvelope | null>(null);
+  let restoreBusy = $state(false);
 
   let pinForm = $state({ current: "", next: "", confirm: "" });
 
@@ -78,6 +89,7 @@
     try {
       settings = await api.getSettings();
       defaultVatStr = String(settings.default_vat);
+      setIdleTimeoutMinutes(settings.idle_timeout_minutes);
       health = await api.ollamaHealth();
       if ($isAdmin) {
         users = await api.listUsers();
@@ -112,6 +124,7 @@
     try {
       settings.default_vat = Number(defaultVatStr) as VatRate;
       settings = await api.updateSettings(settings);
+      setIdleTimeoutMinutes(settings.idle_timeout_minutes);
       showToast("Ajustes guardados");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error", "err");
@@ -143,9 +156,43 @@
       a.download = `hexa-crm-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
+      settings = await api.getSettings();
       showToast("Copia de seguridad descargada");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Error al exportar", "err");
+    }
+  }
+
+  async function inspectBackupFile(event: Event) {
+    const file = (event.currentTarget as HTMLInputElement).files?.[0];
+    restorePreview = null;
+    if (!file) return;
+    try {
+      const validation = await parseBackupJson(await file.text());
+      if (!validation.ok) {
+        showToast(validation.error, "err");
+        return;
+      }
+      restorePreview = validation.envelope;
+    } catch {
+      showToast("No se pudo leer la copia. Elige un JSON válido.", "err");
+    }
+  }
+
+  async function restoreBackup() {
+    if (!restorePreview) return;
+    if (!confirm("Se sustituirán los datos locales por esta copia y se cerrará la sesión. ¿Continuar?")) {
+      return;
+    }
+    restoreBusy = true;
+    try {
+      await api.restoreBackup(restorePreview);
+      clearSession();
+      showToast("Copia restaurada. Inicia sesión de nuevo.");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "No se pudo restaurar la copia", "err");
+    } finally {
+      restoreBusy = false;
     }
   }
 
@@ -311,14 +358,12 @@
 {:else}
   <!-- Page header: calm orientation, not a wall of forms -->
   <header
-    class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+    class="settings-intro workspace-intro workspace-intro-compact mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
     data-ajustes-header
   >
     <div>
-      <p class="section-label mb-1">Configuración</p>
-      <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)] sm:text-3xl">
-        Ajustes
-      </h1>
+      <p class="workspace-index">07 / AJUSTES</p>
+      <h1>Tu espacio,<br /><em>a tu manera.</em></h1>
       <p class="mt-1 max-w-lg text-sm text-[var(--color-muted)]">
         Elige una categoría a la izquierda. Solo ves lo que necesitas en cada momento.
       </p>
@@ -397,6 +442,16 @@
               </Badge>
             </div>
 
+            <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-black/20 px-3 py-3">
+              <div>
+                <p class="text-sm font-medium text-[var(--color-text)]">Aspecto</p>
+                <p class="mt-0.5 text-xs text-[var(--color-muted)]">Tema {$theme === "dark" ? "oscuro" : "claro"}, guardado en este dispositivo.</p>
+              </div>
+              <Button variant="secondary" onclick={toggleTheme} data-theme-toggle>
+                Usar modo {$theme === "dark" ? "claro" : "oscuro"}
+              </Button>
+            </div>
+
             <form
               class="grid grid-cols-1 gap-3"
               onsubmit={(e) => {
@@ -413,6 +468,34 @@
                 <Button type="submit" variant="secondary">Actualizar contraseña</Button>
               </div>
             </form>
+
+            {#if $isAdmin}
+              <div class="mt-6 border-t border-[var(--color-border)] pt-5">
+                <p class="section-label mb-1">Mostrador compartido</p>
+                <h3 class="text-sm font-semibold text-[var(--color-text)]">Bloqueo por inactividad</h3>
+                <p class="mt-1 text-xs text-[var(--color-muted)]">
+                  Tras este tiempo se cierra la sesión en pantalla. Usa 0 para desactivarlo.
+                </p>
+                <div class="mt-3 flex flex-wrap items-end gap-2">
+                  <label class="flex w-40 flex-col gap-1.5 text-sm">
+                    <span class="font-medium text-[var(--color-muted)]">Minutos (0–480)</span>
+                    <input
+                      class="field w-full"
+                      type="number"
+                      min="0"
+                      max="480"
+                      value={settings.idle_timeout_minutes}
+                      oninput={(event) => {
+                        settings!.idle_timeout_minutes = normalizeIdleTimeoutMinutes(
+                          Number((event.currentTarget as HTMLInputElement).value),
+                        );
+                      }}
+                    />
+                  </label>
+                  <Button onclick={save}>Guardar bloqueo</Button>
+                </div>
+              </div>
+            {/if}
           </div>
         </Card>
       {:else if activeSection === "tienda"}
@@ -565,6 +648,15 @@
             {/if}
           </div>
         </Card>
+      {:else if activeSection === "plugins" && $isAdmin}
+        <div>
+          <div class="mb-4">
+            <p class="section-label mb-1">Extensiones</p>
+            <h2 class="text-lg font-semibold text-radiant-bright">{activeMeta.title}</h2>
+            <p class="mt-1 text-sm text-[var(--color-muted)]">{activeMeta.hint}</p>
+          </div>
+          <PluginManager />
+        </div>
       {:else if activeSection === "actualizaciones"}
         <div data-update-panel="github">
           <Card
@@ -667,8 +759,35 @@
                 <Button variant="secondary" onclick={exportBackup}>Exportar copia</Button>
               </div>
               <p class="mt-3 text-xs text-[var(--color-muted-dim)]">
-                Descarga un JSON con los datos de la instancia (browser o API).
+                {#if settings.last_backup_at}
+                  Última copia: {new Date(settings.last_backup_at).toLocaleString("es-ES")}.
+                {:else}
+                  Aún no hay una copia registrada. Descarga un JSON con los datos de la instancia.
+                {/if}
               </p>
+              {#if !api.isTauri()}
+                <div class="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <p class="text-sm font-medium text-[var(--color-text)]">Restaurar una copia</p>
+                  <p class="mt-1 text-xs text-[var(--color-muted)]">
+                    Primero comprobamos el checksum y te mostramos la fecha; nada se restaura al seleccionar el archivo.
+                  </p>
+                  <input
+                    class="mt-3 block w-full text-xs text-[var(--color-muted)] file:mr-3 file:rounded-lg file:border-0 file:bg-purple-500/15 file:px-3 file:py-2 file:text-xs file:font-medium file:text-[var(--color-purple-bright)]"
+                    type="file"
+                    accept="application/json,.json"
+                    onchange={inspectBackupFile}
+                  />
+                  {#if restorePreview}
+                    <div class="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-xs text-amber-100">
+                      <p class="font-medium">Copia válida · {new Date(restorePreview.created_at).toLocaleString("es-ES")}</p>
+                      <p class="mt-1 break-all text-amber-100/70">Checksum: {restorePreview.checksum}</p>
+                      <Button class="mt-3" variant="danger" onclick={restoreBackup} disabled={restoreBusy}>
+                        {restoreBusy ? "Restaurando…" : "Confirmar restauración"}
+                      </Button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             {:else}
               <p class="text-sm text-[var(--color-muted)]">
                 Las copias de seguridad las gestiona un administrador.
