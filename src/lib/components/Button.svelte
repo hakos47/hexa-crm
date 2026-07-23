@@ -15,6 +15,7 @@
   }: HTMLButtonAttributes & {
     variant?: Variant;
     children: Snippet;
+    [attribute: string]: unknown;
   } = $props();
 
   const base =

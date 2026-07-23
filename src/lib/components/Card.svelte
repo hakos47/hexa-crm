@@ -10,6 +10,7 @@
   }: HTMLAttributes<HTMLDivElement> & {
     lift?: boolean;
     children: Snippet;
+    [attribute: string]: unknown;
   } = $props();
 </script>
 
