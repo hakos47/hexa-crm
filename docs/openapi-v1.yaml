@@ -121,15 +121,26 @@ paths:
     get:
       summary: KPIs operativos y alertas de stock del tenant del operador
       security: [{ operatorBearer: [] }]
-  /orders:
-    get:
-      summary: Historial canónico de pedidos de un comprador externo del tenant
+  /integrations/stripe/execute:
+    post:
+      summary: Ejecución backend-a-backend de herramientas de lectura Stripe MCP autorizadas
       security: [{ serviceHmac: [] }]
       parameters:
-        - { name: external_customer_id, in: query, required: true, schema: { type: string } }
-    post:
-      summary: Confirma una reserva como pedido canónico
+        - { name: X-Hexa-Idempotency-Key, in: header, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Herramienta de lectura ejecutada con éxito }
+        '400': { description: Parámetros inválidos, plugin desactivado, falta secreto o crm_approval_required (operación de escritura rechazada por API externa) }
+        '403': { description: Herramienta no autorizada para el tenant }
+  /integrations/events:
+    get:
+      summary: Stream SSE backend-a-backend de eventos de outbox autenticado por HMAC
       security: [{ serviceHmac: [] }]
+      parameters:
+        - { name: correlation_id, in: query, required: false, schema: { type: string } }
+        - { name: last_event_id, in: query, required: false, schema: { type: integer } }
+        - { name: Last-Event-ID, in: header, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Stream SSE abierto (event: ready, integration_event) }
 components:
   securitySchemes:
     serviceHmac:
