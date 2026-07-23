@@ -251,4 +251,68 @@ describe("tenant plugin management (browser-store)", () => {
     expect(approvalBlock?.result).toBe("blocked");
     expect(approvalBlock?.tool_name).toBe("create_payment_link");
   });
+
+  it("executes authorized read tool in local simulation mode without network fetch calls and records audit log", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    await browserApi.update_plugin("stripe_mcp", true, {}, token);
+
+    const res = await browserApi.call_plugin_tool(
+      "stripe_mcp",
+      "retrieve_balance",
+      {},
+      false,
+      token,
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.plugin_key).toBe("stripe_mcp");
+    expect(res.tool_name).toBe("retrieve_balance");
+    expect((res.result as any).simulation).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
+    const readLog = logs.find(
+      (l) => l.action === "tool_read" && l.tool_name === "retrieve_balance",
+    );
+    expect(readLog).toBeDefined();
+    expect(readLog?.result).toBe("ok");
+    expect(readLog?.actor_name).toBe("Administrador");
+
+    fetchSpy.mockRestore();
+  });
+
+  it("executes authorized write tool with confirmation in local simulation mode without network fetch calls and records audit log", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const adminLogin = await browserApi.login("admin", "1234");
+    const token = adminLogin.token;
+
+    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token);
+
+    const res = await browserApi.call_plugin_tool(
+      "stripe_mcp",
+      "create_payment_link",
+      { title: "Test Link" },
+      true,
+      token,
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.plugin_key).toBe("stripe_mcp");
+    expect(res.tool_name).toBe("create_payment_link");
+    expect((res.result as any).simulation).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
+    const writeLog = logs.find(
+      (l) => l.action === "tool_write" && l.tool_name === "create_payment_link",
+    );
+    expect(writeLog).toBeDefined();
+    expect(writeLog?.result).toBe("ok");
+    expect(writeLog?.actor_name).toBe("Administrador");
+
+    fetchSpy.mockRestore();
+  });
 });

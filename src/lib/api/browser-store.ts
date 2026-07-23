@@ -47,7 +47,6 @@ import type {
 } from "../types";
 import {
   PLUGIN_CATALOG,
-  callStripeTool,
   listStripeTools,
   pluginDefinition,
   redactSensitive,
@@ -2748,24 +2747,30 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
         throw new Error("Esta operación necesita confirmación explícita");
       }
     }
-    try {
-      const result = await callStripeTool(plugin.config, toolName, args ?? {});
-      pluginAuditLocal(
-        s,
-        companyId,
-        user.id,
-        pluginKey,
-        access.write ? "tool_write" : "tool_read",
-        toolName,
-        "ok",
-        `Ejecución exitosa de ${toolName}`,
-      );
-      return result;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      pluginAuditLocal(s, companyId, user.id, pluginKey, "tool_error", toolName, "error", msg);
-      throw err;
-    }
+    const resultData = {
+      mode: "local",
+      simulation: true,
+      environment: plugin.config.environment ?? "sandbox",
+      tool_name: toolName,
+      args: args ?? {},
+      executed_at: now(),
+    };
+    pluginAuditLocal(
+      s,
+      companyId,
+      user.id,
+      pluginKey,
+      access.write ? "tool_write" : "tool_read",
+      toolName,
+      "ok",
+      `Ejecución simulada local de ${toolName}`,
+    );
+    return {
+      ok: true,
+      plugin_key: pluginKey,
+      tool_name: toolName,
+      result: resultData,
+    };
   },
 
   async list_plugin_logs(

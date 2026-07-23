@@ -461,7 +461,7 @@ export async function initDb() {
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
   // Defense in depth for central API roles. Requests set app.company_id locally.
-  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log", "plugin_audit_log"] as const) {
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log", "plugin_audit_log", "tenant_plugins"] as const) {
     const policy = `${table}_tenant_isolation`;
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
