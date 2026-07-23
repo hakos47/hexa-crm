@@ -10,19 +10,26 @@ import type {
   CashMovement,
   Company,
   CompanyMember,
+  CreateInventoryMovementInput,
   CreateUserResult,
   Customer,
   CustomerInput,
   DashboardStats,
+  InventoryMovement,
+  InventoryMovementType,
+  InventoryReason,
   LoginResult,
   Product,
   ProductInput,
   Sale,
   SaleLineInput,
   Settings,
+  StockBalance,
+  StockLocation,
   UserInput,
   UserRole,
   VatSummary,
+  Warehouse,
   WorkCategory,
   WorkItem,
   WorkItemFilters,
@@ -65,9 +72,10 @@ import {
   type BackupEnvelope,
 } from "../backup/backup";
 
-const KEY = "hexa-crm-store-v6";
+const KEY = "hexa-crm-store-v7";
 /** Legacy localStorage keys (pre-rename) — read once, then persist under KEY. */
 const LEGACY_STORE_KEYS = [
+  "hexa-crm-store-v6",
   "hexa-crm-store-v5",
   "nix-c-store-v5",
   "nix-c-store-v4",
@@ -102,6 +110,10 @@ type Store = {
     reason: string;
     created_at: string;
   }[];
+  warehouses: Warehouse[];
+  stockLocations: StockLocation[];
+  stockBalances: StockBalance[];
+  inventoryMovements: InventoryMovement[];
   workCategories: WorkCategory[];
   workProjects: WorkProject[];
   workItems: WorkItem[];
@@ -120,6 +132,9 @@ type Store = {
     workCategory: number;
     workProject: number;
     workItem: number;
+    warehouse: number;
+    stockLocation: number;
+    inventoryMovement: number;
   };
 };
 
@@ -275,6 +290,10 @@ function seed(): Store {
     saleLines: [],
     cash: [],
     stockMovements: [],
+    warehouses: [],
+    stockLocations: [],
+    stockBalances: [],
+    inventoryMovements: [],
     workCategories: [],
     workProjects: [],
     workItems: [],
@@ -293,6 +312,9 @@ function seed(): Store {
       workCategory: 0,
       workProject: 0,
       workItem: 0,
+      warehouse: 0,
+      stockLocation: 0,
+      inventoryMovement: 0,
     },
   };
 }
@@ -309,9 +331,16 @@ function load(): Store {
   if (typeof localStorage === "undefined") {
     if (!memoryStore) memoryStore = seed();
     memoryStore.users = memoryStore.users.map(normalizeUser);
+    if (!memoryStore.warehouses) memoryStore.warehouses = [];
+    if (!memoryStore.stockLocations) memoryStore.stockLocations = [];
+    if (!memoryStore.stockBalances) memoryStore.stockBalances = [];
+    if (!memoryStore.inventoryMovements) memoryStore.inventoryMovements = [];
     if (!memoryStore.workCategories) memoryStore.workCategories = [];
     if (!memoryStore.workProjects) memoryStore.workProjects = [];
     if (!memoryStore.workItems) memoryStore.workItems = [];
+    if (memoryStore.seq.warehouse == null) memoryStore.seq.warehouse = 0;
+    if (memoryStore.seq.stockLocation == null) memoryStore.seq.stockLocation = 0;
+    if (memoryStore.seq.inventoryMovement == null) memoryStore.seq.inventoryMovement = 0;
     if (memoryStore.seq.workCategory == null) memoryStore.seq.workCategory = 0;
     if (memoryStore.seq.workProject == null) memoryStore.seq.workProject = 0;
     if (memoryStore.seq.workItem == null) memoryStore.seq.workItem = 0;
@@ -342,6 +371,10 @@ function load(): Store {
     if (!parsed.sessions) parsed.sessions = {};
     if (!parsed.companies) parsed.companies = [];
     if (!parsed.company_members) parsed.company_members = [];
+    if (!parsed.warehouses) parsed.warehouses = [];
+    if (!parsed.stockLocations) parsed.stockLocations = [];
+    if (!parsed.stockBalances) parsed.stockBalances = [];
+    if (!parsed.inventoryMovements) parsed.inventoryMovements = [];
     if (!parsed.workCategories) parsed.workCategories = [];
     if (!parsed.workProjects) parsed.workProjects = [];
     if (!parsed.workItems) parsed.workItems = [];
@@ -358,10 +391,16 @@ function load(): Store {
         workCategory: 0,
         workProject: 0,
         workItem: 0,
+        warehouse: 0,
+        stockLocation: 0,
+        inventoryMovement: 0,
       };
     }
     if (parsed.seq.user == null) parsed.seq.user = parsed.users.length;
     if (parsed.seq.company == null) parsed.seq.company = parsed.companies?.length ?? 0;
+    if (parsed.seq.warehouse == null) parsed.seq.warehouse = parsed.warehouses.length;
+    if (parsed.seq.stockLocation == null) parsed.seq.stockLocation = parsed.stockLocations.length;
+    if (parsed.seq.inventoryMovement == null) parsed.seq.inventoryMovement = parsed.inventoryMovements.length;
     if (parsed.seq.workCategory == null) parsed.seq.workCategory = 0;
     if (parsed.seq.workProject == null) parsed.seq.workProject = 0;
     if (parsed.seq.workItem == null) parsed.seq.workItem = 0;
@@ -458,6 +497,119 @@ function ensureCompanies(s: Store): Store {
     if (m.company_id == null) m.company_id = 1;
   }
   save(s);
+  return ensureInventory(s);
+}
+
+function ensureInventory(s: Store): Store {
+  const t = now();
+  if (!s.warehouses) s.warehouses = [];
+  if (!s.stockLocations) s.stockLocations = [];
+  if (!s.stockBalances) s.stockBalances = [];
+  if (!s.inventoryMovements) s.inventoryMovements = [];
+  if (s.seq.warehouse == null) s.seq.warehouse = s.warehouses.length;
+  if (s.seq.stockLocation == null) s.seq.stockLocation = s.stockLocations.length;
+  if (s.seq.inventoryMovement == null) s.seq.inventoryMovement = s.inventoryMovements.length;
+
+  let changed = false;
+
+  for (const company of s.companies) {
+    let defaultWh = s.warehouses.find(
+      (w) => w.company_id === company.id && (w.is_default || w.code === "WH-MAIN")
+    );
+    if (!defaultWh) {
+      defaultWh = s.warehouses.find((w) => w.company_id === company.id);
+    }
+    if (!defaultWh) {
+      s.seq.warehouse += 1;
+      defaultWh = {
+        id: s.seq.warehouse,
+        company_id: company.id,
+        code: "WH-MAIN",
+        name: "Almacén Principal",
+        address: null,
+        is_default: true,
+        active: true,
+        created_at: t,
+        updated_at: t,
+      };
+      s.warehouses.push(defaultWh);
+      changed = true;
+    }
+
+    let defaultLoc = s.stockLocations.find(
+      (loc) => loc.company_id === company.id && (loc.code === "LOC-MAIN" || loc.warehouse_id === defaultWh!.id)
+    );
+    if (!defaultLoc) {
+      s.seq.stockLocation += 1;
+      defaultLoc = {
+        id: s.seq.stockLocation,
+        company_id: company.id,
+        warehouse_id: defaultWh.id,
+        code: "LOC-MAIN",
+        name: "Ubicación Principal",
+        location_type: "warehouse",
+        allow_negative_stock: false,
+        active: true,
+        created_at: t,
+        updated_at: t,
+      };
+      s.stockLocations.push(defaultLoc);
+      changed = true;
+    }
+
+    const companyProducts = s.products.filter((p) => (p.company_id ?? 1) === company.id);
+    for (const p of companyProducts) {
+      const existingBal = s.stockBalances.find(
+        (b) => b.company_id === company.id && b.product_id === p.id && b.location_id === defaultLoc!.id
+      );
+      if (!existingBal && p.stock > 0) {
+        s.stockBalances.push({
+          company_id: company.id,
+          product_id: p.id,
+          location_id: defaultLoc.id,
+          location_name: defaultLoc.name,
+          warehouse_id: defaultWh.id,
+          on_hand: p.stock,
+          reserved: 0,
+          available: p.stock,
+          incoming: 0,
+          min_stock: p.min_stock ?? 0,
+          max_stock: null,
+          updated_at: t,
+        });
+
+        s.seq.inventoryMovement += 1;
+        s.inventoryMovements.push({
+          id: s.seq.inventoryMovement,
+          company_id: company.id,
+          product_id: p.id,
+          product_sku: p.sku,
+          product_name: p.name,
+          movement_type: "in",
+          reason: "initial_stock",
+          quantity: p.stock,
+          from_location_id: null,
+          to_location_id: defaultLoc.id,
+          from_location_name: null,
+          to_location_name: defaultLoc.name,
+          unit_cost_cents: p.cost_cents ?? null,
+          reference_type: "initial_stock",
+          reference_id: null,
+          reversed_movement_id: null,
+          is_reversal: false,
+          notes: "Carga inicial de stock",
+          created_by: null,
+          created_by_name: "Sistema",
+          created_at: t,
+        });
+        changed = true;
+      }
+    }
+  }
+
+  if (changed) {
+    save(s);
+  }
   return s;
 }
 
@@ -530,7 +682,6 @@ function requireAdminProjectManagement(s: Store, token?: string | null): AuthUse
   }
   return u;
 }
-
 function populateWorkItem(item: WorkItem, s: Store): WorkItem {
   const category =
     item.category_id != null
@@ -888,9 +1039,39 @@ export const browserApi = {
   adjust_stock(productId: number, delta: number, reason: string, token?: string | null): Product {
     const s = load();
     ensureCompanies(s);
+    ensureInventory(s);
     const cid = sessionCompanyId(s, token);
     const p = s.products.find((x) => x.id === productId && (x.company_id ?? 1) === cid);
     if (!p) throw new Error("Producto no encontrado");
+
+    const defaultLoc = s.stockLocations.find((l) => l.company_id === cid && (l.code === "LOC-MAIN" || l.active));
+    if (delta > 0 && defaultLoc) {
+      this.create_inventory_movement(
+        {
+          product_id: productId,
+          movement_type: "in",
+          reason: reason || "audit_adjustment",
+          quantity: delta,
+          to_location_id: defaultLoc.id,
+        },
+        token
+      );
+      return s.products.find((x) => x.id === productId && (x.company_id ?? 1) === cid) || p;
+    } else if (delta < 0 && defaultLoc) {
+      this.create_inventory_movement(
+        {
+          product_id: productId,
+          movement_type: "out",
+          reason: reason || "audit_adjustment",
+          quantity: Math.abs(delta),
+          from_location_id: defaultLoc.id,
+          allow_negative_stock: true,
+        },
+        token
+      );
+      return s.products.find((x) => x.id === productId && (x.company_id ?? 1) === cid) || p;
+    }
+
     p.stock += delta;
     p.updated_at = now();
     s.seq.stock += 1;
@@ -903,6 +1084,309 @@ export const browserApi = {
     });
     save(s);
     return p;
+  },
+
+  list_warehouses(token?: string | null): Warehouse[] {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+    return s.warehouses.filter((w) => w.company_id === cid && w.active !== false);
+  },
+
+  list_stock_locations(warehouse_id?: number | null, token?: string | null): StockLocation[] {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+    return s.stockLocations.filter((loc) => {
+      if (loc.company_id !== cid) return false;
+      if (loc.active === false) return false;
+      if (warehouse_id != null && loc.warehouse_id !== warehouse_id) return false;
+      return true;
+    });
+  },
+
+  list_stock_balances(
+    filters?: {
+      product_id?: number;
+      location_id?: number;
+      warehouse_id?: number;
+      low_stock_only?: boolean;
+    },
+    token?: string | null
+  ): StockBalance[] {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+    return s.stockBalances
+      .filter((b) => {
+        if (b.company_id !== cid) return false;
+        if (filters?.product_id != null && b.product_id !== filters.product_id) return false;
+        if (filters?.location_id != null && b.location_id !== filters.location_id) return false;
+        if (filters?.warehouse_id != null && b.warehouse_id !== filters.warehouse_id) return false;
+        if (filters?.low_stock_only && b.on_hand > (b.min_stock ?? 0)) return false;
+        return true;
+      })
+      .map((b) => {
+        const loc = s.stockLocations.find((l) => l.id === b.location_id);
+        return {
+          ...b,
+          location_name: b.location_name || loc?.name || "Ubicación",
+          warehouse_id: b.warehouse_id || loc?.warehouse_id || null,
+        };
+      });
+  },
+
+  list_inventory_movements(
+    filters?: {
+      product_id?: number;
+      location_id?: number;
+      movement_type?: string;
+      reason?: string;
+      from_date?: string;
+      to_date?: string;
+      limit?: number;
+    },
+    token?: string | null
+  ): InventoryMovement[] {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+    let res = s.inventoryMovements.filter((m) => {
+      if (m.company_id !== cid) return false;
+      if (filters?.product_id != null && m.product_id !== filters.product_id) return false;
+      if (
+        filters?.location_id != null &&
+        m.from_location_id !== filters.location_id &&
+        m.to_location_id !== filters.location_id
+      ) {
+        return false;
+      }
+      if (filters?.movement_type && m.movement_type !== filters.movement_type) return false;
+      if (filters?.reason && m.reason !== filters.reason) return false;
+      if (filters?.from_date && m.created_at < filters.from_date) return false;
+      if (filters?.to_date && m.created_at > filters.to_date) return false;
+      return true;
+    });
+
+    res.sort((a, b) => b.id - a.id);
+    if (filters?.limit != null && filters.limit > 0) {
+      res = res.slice(0, filters.limit);
+    }
+    return res;
+  },
+
+  create_inventory_movement(
+    input: CreateInventoryMovementInput,
+    token?: string | null
+  ): InventoryMovement {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+    let user: AuthUser | null = null;
+    try {
+      user = token ? requireSession(s, token) : null;
+    } catch {
+      user = null;
+    }
+
+    if (input.idempotency_key) {
+      const existing = s.inventoryMovements.find(
+        (m) => m.company_id === cid && m.idempotency_key === input.idempotency_key
+      );
+      if (existing) {
+        return existing;
+      }
+    }
+
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+      throw new Error("La cantidad debe ser mayor que cero");
+    }
+
+    const p = s.products.find((pr) => pr.id === input.product_id && (pr.company_id ?? 1) === cid);
+    if (!p) {
+      throw new Error("Producto no encontrado");
+    }
+
+    const fromLoc = input.from_location_id
+      ? s.stockLocations.find((l) => l.id === input.from_location_id && l.company_id === cid)
+      : null;
+    const toLoc = input.to_location_id
+      ? s.stockLocations.find((l) => l.id === input.to_location_id && l.company_id === cid)
+      : null;
+
+    if (input.movement_type === "in" && !toLoc) {
+      throw new Error("Ubicación de destino requerida para entradas");
+    }
+    if (input.movement_type === "out" && !fromLoc) {
+      throw new Error("Ubicación de origen requerida para salidas");
+    }
+    if (input.movement_type === "transfer") {
+      if (!fromLoc || !toLoc) {
+        throw new Error("Ubicación de origen y destino requeridas para traspasos");
+      }
+      if (fromLoc.id === toLoc.id) {
+        throw new Error("La ubicación de origen y destino no pueden ser iguales");
+      }
+    }
+
+    if (fromLoc) {
+      const allowNegative = input.allow_negative_stock || fromLoc.allow_negative_stock || false;
+      const fromBal = s.stockBalances.find(
+        (b) => b.company_id === cid && b.product_id === p.id && b.location_id === fromLoc.id
+      );
+      const currentOnHand = fromBal ? fromBal.on_hand : 0;
+      if (!allowNegative && currentOnHand < input.quantity) {
+        throw new Error("Stock insuficiente en la ubicación de origen");
+      }
+    }
+
+    const createdAt = now();
+
+    if (fromLoc) {
+      let fromBal = s.stockBalances.find(
+        (b) => b.company_id === cid && b.product_id === p.id && b.location_id === fromLoc.id
+      );
+      if (!fromBal) {
+        fromBal = {
+          company_id: cid,
+          product_id: p.id,
+          location_id: fromLoc.id,
+          location_name: fromLoc.name,
+          warehouse_id: fromLoc.warehouse_id,
+          on_hand: 0,
+          reserved: 0,
+          available: 0,
+          incoming: 0,
+          min_stock: p.min_stock ?? 0,
+          max_stock: null,
+          updated_at: createdAt,
+        };
+        s.stockBalances.push(fromBal);
+      }
+      fromBal.on_hand -= input.quantity;
+      fromBal.available = fromBal.on_hand - fromBal.reserved;
+      fromBal.updated_at = createdAt;
+    }
+
+    if (toLoc) {
+      let toBal = s.stockBalances.find(
+        (b) => b.company_id === cid && b.product_id === p.id && b.location_id === toLoc.id
+      );
+      if (!toBal) {
+        toBal = {
+          company_id: cid,
+          product_id: p.id,
+          location_id: toLoc.id,
+          location_name: toLoc.name,
+          warehouse_id: toLoc.warehouse_id,
+          on_hand: 0,
+          reserved: 0,
+          available: 0,
+          incoming: 0,
+          min_stock: p.min_stock ?? 0,
+          max_stock: null,
+          updated_at: createdAt,
+        };
+        s.stockBalances.push(toBal);
+      }
+      toBal.on_hand += input.quantity;
+      toBal.available = toBal.on_hand - toBal.reserved;
+      toBal.updated_at = createdAt;
+    }
+
+    if (toLoc && !fromLoc) {
+      p.stock += input.quantity;
+    } else if (fromLoc && !toLoc) {
+      p.stock -= input.quantity;
+    }
+    p.updated_at = createdAt;
+
+    s.seq.inventoryMovement += 1;
+    const mov: InventoryMovement = {
+      id: s.seq.inventoryMovement,
+      company_id: cid,
+      product_id: p.id,
+      product_sku: p.sku,
+      product_name: p.name,
+      movement_type: input.movement_type,
+      reason: input.reason,
+      quantity: input.quantity,
+      from_location_id: fromLoc ? fromLoc.id : null,
+      to_location_id: toLoc ? toLoc.id : null,
+      from_location_name: fromLoc ? fromLoc.name : null,
+      to_location_name: toLoc ? toLoc.name : null,
+      unit_cost_cents: input.unit_cost_cents ?? p.cost_cents ?? null,
+      reference_type: input.reference_type ?? null,
+      reference_id: input.reference_id != null ? String(input.reference_id) : null,
+      reversed_movement_id: input.reversed_movement_id ?? null,
+      is_reversal: input.reversed_movement_id != null,
+      idempotency_key: input.idempotency_key ?? null,
+      notes: input.notes ?? null,
+      created_by: user ? user.id : null,
+      created_by_name: user ? user.display_name : "Sistema",
+      created_at: createdAt,
+    };
+    s.inventoryMovements.push(mov);
+
+    s.seq.stock += 1;
+    s.stockMovements.push({
+      id: s.seq.stock,
+      product_id: p.id,
+      delta: (toLoc ? input.quantity : 0) - (fromLoc ? input.quantity : 0),
+      reason: input.reason,
+      created_at: createdAt,
+    });
+
+    save(s);
+    return mov;
+  },
+
+  reverse_inventory_movement(
+    movement_id: number,
+    reason?: string,
+    token?: string | null
+  ): InventoryMovement {
+    const s = load();
+    ensureCompanies(s);
+    ensureInventory(s);
+    const cid = sessionCompanyId(s, token);
+
+    const orig = s.inventoryMovements.find((m) => m.id === movement_id && m.company_id === cid);
+    if (!orig) {
+      throw new Error("Movimiento no encontrado");
+    }
+    if (orig.is_reversal) {
+      throw new Error("No se puede anular una anulación");
+    }
+    const existingReversal = s.inventoryMovements.find(
+      (m) => m.company_id === cid && m.reversed_movement_id === orig.id
+    );
+    if (existingReversal) {
+      throw new Error("El movimiento ya ha sido anulado");
+    }
+
+    const reversalInput: CreateInventoryMovementInput = {
+      company_id: cid,
+      product_id: orig.product_id,
+      movement_type: "reversal",
+      reason: reason || "movement_reversal",
+      quantity: orig.quantity,
+      from_location_id: orig.to_location_id ?? null,
+      to_location_id: orig.from_location_id ?? null,
+      unit_cost_cents: orig.unit_cost_cents,
+      reference_type: "movement_reversal",
+      reference_id: orig.id,
+      reversed_movement_id: orig.id,
+      notes: `Reversión del movimiento #${orig.id}${reason ? `: ${reason}` : ""}`,
+      allow_negative_stock: true,
+    };
+
+    return this.create_inventory_movement(reversalInput, token);
   },
 
   list_customers(token?: string | null): Customer[] {
@@ -1472,6 +1956,10 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     if (!payload || !Array.isArray(payload.products) || !Array.isArray(payload.users)) {
       throw new Error("Copia inválida: estructura de tienda incompleta.");
     }
+    const warehouses = Array.isArray(payload.warehouses) ? payload.warehouses : [];
+    const stockLocations = Array.isArray(payload.stockLocations) ? payload.stockLocations : [];
+    const stockBalances = Array.isArray(payload.stockBalances) ? payload.stockBalances : [];
+    const inventoryMovements = Array.isArray(payload.inventoryMovements) ? payload.inventoryMovements : [];
     const workCategories = Array.isArray(payload.workCategories) ? payload.workCategories : [];
     const workProjects = Array.isArray(payload.workProjects) ? payload.workProjects : [];
     const workItems = Array.isArray(payload.workItems) ? payload.workItems : [];
@@ -1487,9 +1975,23 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
       workCategory: payload.seq?.workCategory ?? 0,
       workProject: payload.seq?.workProject ?? 0,
       workItem: payload.seq?.workItem ?? 0,
+      warehouse: payload.seq?.warehouse ?? warehouses.length,
+      stockLocation: payload.seq?.stockLocation ?? stockLocations.length,
+      inventoryMovement: payload.seq?.inventoryMovement ?? inventoryMovements.length,
     };
     // Keep current sessions empty after restore — force re-login
-    save({ ...payload, workCategories, workProjects, workItems, seq, sessions: {} });
+    save({
+      ...payload,
+      warehouses,
+      stockLocations,
+      stockBalances,
+      inventoryMovements,
+      workCategories,
+      workProjects,
+      workItems,
+      seq,
+      sessions: {},
+    });
   },
 
   /* -------------------------------------------------------------
@@ -1580,7 +2082,6 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     save(s);
     return { ...proj };
   },
-
   async listWorkItems(filters?: WorkItemFilters, token?: string | null): Promise<WorkItem[]> {
     const s = load();
     const companyId = sessionCompanyId(s, token);

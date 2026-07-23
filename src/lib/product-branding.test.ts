@@ -95,9 +95,9 @@ describe("browser store key rename + legacy read", () => {
     delete globalThis.localStorage;
   });
 
-  it("uses hexa-crm-store-v6 as the canonical localStorage key", () => {
-    expect(__browserStoreKeyForTests()).toBe("hexa-crm-store-v6");
-    expect(__legacyBrowserStoreKeysForTests()).toContain("hexa-crm-store-v5");
+  it("uses hexa-crm-store-v7 as the canonical localStorage key", () => {
+    expect(__browserStoreKeyForTests()).toBe("hexa-crm-store-v7");
+    expect(__legacyBrowserStoreKeysForTests()).toContain("hexa-crm-store-v6");
   });
 
   it("loads data previously saved under nix-c-store-v5", () => {

@@ -334,7 +334,6 @@ export type WorkProjectInput = {
   start_date?: string | null;
   target_date?: string | null;
 };
-
 export type WorkItem = {
   id: number;
   company_id: number;
@@ -400,4 +399,184 @@ export type WorkItemInput = {
   source_type?: string | null;
   source_key?: string | null;
   source_href?: string | null;
+};
+
+/* -------------------------------------------------------------
+   Módulo Inventario / Abastecimiento (Inventory Operations Foundation)
+   ------------------------------------------------------------- */
+
+/**
+ * Almacén físico o centro logístico (Warehouse)
+ */
+export type Warehouse = {
+  id: number;
+  company_id: number;
+  code: string;
+  name: string;
+  address?: string | null;
+  is_default?: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+/**
+ * Categorías / Tipos de ubicación de stock
+ */
+export type StockLocationType =
+  | "store"
+  | "warehouse"
+  | "in_transit"
+  | "quality_hold"
+  | "returns"
+  | "third_party"
+  | "supplier_virtual"
+  | "virtual";
+
+/**
+ * Ubicación de stock (StockLocation) dentro de un almacén o empresa
+ */
+export type StockLocation = {
+  id: number;
+  company_id: number;
+  warehouse_id?: number | null;
+  code: string;
+  name: string;
+  location_type: StockLocationType | string;
+  /** Política de stock negativo: true para permitir saldos menores a 0 */
+  allow_negative_stock: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+/**
+ * Tipo de movimiento de inventario (InventoryMovementType)
+ */
+export type InventoryMovementType =
+  | "in"
+  | "out"
+  | "transfer"
+  | "adjustment"
+  | "reversal";
+
+/**
+ * Motivo del movimiento de inventario (InventoryReason)
+ */
+export type InventoryReason =
+  | "purchase_receive"
+  | "sale_shipment"
+  | "sale_return"
+  | "transfer"
+  | "audit_adjustment"
+  | "damage_spoilage"
+  | "loss_theft"
+  | "initial_stock"
+  | "supplier_return"
+  | "internal_use"
+  | "movement_reversal"
+  | "other";
+
+/**
+ * Etiquetas legibles en español para UI de motivos de inventario
+ */
+export const INVENTORY_REASON_LABELS: Record<InventoryReason, string> = {
+  purchase_receive: "Recepción de compra / proveedor",
+  sale_shipment: "Salida por venta TPV",
+  sale_return: "Devolución de cliente",
+  transfer: "Traspaso entre ubicaciones",
+  audit_adjustment: "Ajuste por inventario / auditoría",
+  damage_spoilage: "Mermas / Daño / Caducidad",
+  loss_theft: "Pérdida / Extravío / Robo",
+  initial_stock: "Carga inicial de stock",
+  supplier_return: "Devolución a proveedor",
+  internal_use: "Uso interno / Muestra",
+  movement_reversal: "Anulación de movimiento",
+  other: "Otro motivo"
+};
+
+/**
+ * Etiquetas legibles en español para UI de tipos de movimiento
+ */
+export const INVENTORY_MOVEMENT_TYPE_LABELS: Record<InventoryMovementType, string> = {
+  in: "Entrada de stock",
+  out: "Salida de stock",
+  transfer: "Traspaso de stock",
+  adjustment: "Ajuste de stock",
+  reversal: "Reversión de movimiento"
+};
+
+/**
+ * Registro de movimiento de inventario auditable (InventoryMovement)
+ */
+export type InventoryMovement = {
+  id: number;
+  company_id: number;
+  product_id: number;
+  product_sku?: string;
+  product_name?: string;
+  movement_type: InventoryMovementType;
+  reason: InventoryReason | string;
+  /** Cantidad del movimiento (siempre número finito >= 0; la dirección la marca el movement_type) */
+  quantity: number;
+  from_location_id?: number | null;
+  to_location_id?: number | null;
+  from_location_name?: string | null;
+  to_location_name?: string | null;
+  unit_cost_cents?: number | null;
+  reference_type?: string | null;
+  reference_id?: number | string | null;
+  /** ID del movimiento original que esta reversión anula */
+  reversed_movement_id?: number | null;
+  is_reversal?: boolean;
+  idempotency_key?: string | null;
+  notes?: string | null;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  created_at: string;
+};
+
+/**
+ * Saldo / Existencias de un producto en una ubicación (StockBalance)
+ */
+export type StockBalance = {
+  id?: number;
+  company_id: number;
+  product_id: number;
+  location_id: number;
+  location_name?: string;
+  warehouse_id?: number | null;
+  /** Existencias físicas (debe ser >= 0 salvo política explícita de stock negativo) */
+  on_hand: number;
+  /** Unidades reservadas por ventas/pedidos pendientes */
+  reserved: number;
+  /** Unidades disponibles para venta (on_hand - reserved) */
+  available: number;
+  /** Unidades en camino / compras pendientes de recepción */
+  incoming: number;
+  min_stock?: number;
+  max_stock?: number | null;
+  updated_at?: string;
+};
+
+/**
+ * DTO para la creación de un nuevo movimiento de inventario (CreateInventoryMovementInput)
+ */
+export type CreateInventoryMovementInput = {
+  company_id?: number;
+  product_id: number;
+  movement_type: InventoryMovementType;
+  reason: InventoryReason | string;
+  /** Cantidad a mover (debe ser finita y > 0) */
+  quantity: number;
+  from_location_id?: number | null;
+  to_location_id?: number | null;
+  unit_cost_cents?: number | null;
+  reference_type?: string | null;
+  reference_id?: number | string | null;
+  reversed_movement_id?: number | null;
+  idempotency_key?: string | null;
+  notes?: string | null;
+  /** Política explícita de stock negativo (false por defecto para impedir saldos < 0) */
+  allow_negative_stock?: boolean;
 };

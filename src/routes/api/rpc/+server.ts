@@ -228,6 +228,24 @@ export const POST: RequestHandler = async ({ request }) => {
       case "capture_dashboard_alert":
         result = await postgresApi.capture_dashboard_alert(args?.input, token);
         break;
+      case "list_warehouses":
+        result = await postgresApi.list_warehouses(token);
+        break;
+      case "list_stock_locations":
+        result = await postgresApi.list_stock_locations(args?.warehouse_id as number | undefined, token);
+        break;
+      case "list_stock_balances":
+        result = await postgresApi.list_stock_balances(args?.filters, token);
+        break;
+      case "list_inventory_movements":
+        result = await postgresApi.list_inventory_movements(args?.filters, token);
+        break;
+      case "create_inventory_movement":
+        result = await postgresApi.create_inventory_movement(args?.input, token);
+        break;
+      case "reverse_inventory_movement":
+        result = await postgresApi.reverse_inventory_movement(args?.movement_id as number, args?.reason as string | undefined, token);
+        break;
       default:
         return json({ error: `Comando no soportado: ${cmd}` }, { status: 400 });
     }

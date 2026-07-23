@@ -114,6 +114,70 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS warehouses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL DEFAULT 1,
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            address TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS stock_locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL DEFAULT 1,
+            warehouse_id INTEGER REFERENCES warehouses(id),
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            location_type TEXT NOT NULL DEFAULT 'warehouse',
+            allow_negative_stock INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS stock_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL DEFAULT 1,
+            product_id INTEGER NOT NULL REFERENCES products(id),
+            location_id INTEGER NOT NULL REFERENCES stock_locations(id),
+            on_hand INTEGER NOT NULL DEFAULT 0,
+            reserved INTEGER NOT NULL DEFAULT 0,
+            available INTEGER NOT NULL DEFAULT 0,
+            incoming INTEGER NOT NULL DEFAULT 0,
+            min_stock INTEGER NOT NULL DEFAULT 0,
+            max_stock INTEGER,
+            updated_at TEXT,
+            UNIQUE(product_id, location_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL DEFAULT 1,
+            product_id INTEGER NOT NULL REFERENCES products(id),
+            product_sku TEXT,
+            product_name TEXT,
+            movement_type TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            from_location_id INTEGER REFERENCES stock_locations(id),
+            to_location_id INTEGER REFERENCES stock_locations(id),
+            from_location_name TEXT,
+            to_location_name TEXT,
+            unit_cost_cents INTEGER,
+            reference_type TEXT,
+            reference_id TEXT,
+            reversed_movement_id INTEGER REFERENCES inventory_movements(id),
+            is_reversal INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_by INTEGER,
+            created_by_name TEXT,
+            created_at TEXT NOT NULL
+        );
         "#,
     )
     .map_err(|e| e.to_string())?;
