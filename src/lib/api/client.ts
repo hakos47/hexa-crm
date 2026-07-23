@@ -6,10 +6,12 @@ import type {
   CashInput,
   CashMovement,
   Company,
+  CreateInventoryMovementInput,
   CreateUserResult,
   Customer,
   CustomerInput,
   DashboardStats,
+  InventoryMovement,
   LoginResult,
   Product,
   ProductInput,
@@ -20,11 +22,14 @@ import type {
   Sale,
   SaleLineInput,
   Settings,
+  StockBalance,
+  StockLocation,
   TenantPlugin,
   Supplier,
   SupplierInput,
   UserInput,
   VatSummary,
+  Warehouse,
   WorkCategory,
   WorkItem,
   WorkItemFilters,
@@ -99,6 +104,12 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "list_suppliers": return [] as T;
     case "upsert_supplier": throw new Error("Los proveedores aún requieren el CRM central");
     case "adjust_stock": return browserApi.adjust_stock(args.product_id, args.delta, args.reason, token) as T;
+    case "list_warehouses": return browserApi.list_warehouses(token) as T;
+    case "list_stock_locations": return browserApi.list_stock_locations(args.warehouse_id, token) as T;
+    case "list_stock_balances": return browserApi.list_stock_balances(args.filters, token) as T;
+    case "list_inventory_movements": return browserApi.list_inventory_movements(args.filters, token) as T;
+    case "create_inventory_movement": return browserApi.create_inventory_movement(args.input, token) as T;
+    case "reverse_inventory_movement": return browserApi.reverse_inventory_movement(args.movement_id, args.reason, token) as T;
     case "list_customers": return browserApi.list_customers(token) as T;
     case "upsert_customer": return browserApi.upsert_customer(args.input, token) as T;
     case "create_sale": return browserApi.create_sale(args.lines, args.customer_id, args.notes, token) as T;
@@ -129,6 +140,12 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "archive_work_category": return browserApi.archiveWorkCategory(args.id, token) as Promise<T>;
     case "list_work_members": return browserApi.listWorkMembers(token) as Promise<T>;
     case "capture_dashboard_alert": return browserApi.captureDashboardAlert(args.input, token) as Promise<T>;
+    case "list_warehouses": return [{ id: 1, company_id: 1, code: "WH-MAIN", name: "Almacén Principal", is_default: true, active: true, created_at: new Date().toISOString() }] as T;
+    case "list_stock_locations": return [{ id: 1, company_id: 1, warehouse_id: 1, code: "LOC-MAIN", name: "Ubicación Principal", location_type: "warehouse", allow_negative_stock: false, active: true, created_at: new Date().toISOString() }] as T;
+    case "list_stock_balances": return [] as T;
+    case "list_inventory_movements": return [] as T;
+    case "create_inventory_movement": throw new Error("Los movimientos de inventario requieren el CRM central con PostgreSQL");
+    case "reverse_inventory_movement": throw new Error("La reversión de movimientos requiere el CRM central con PostgreSQL");
     default: throw new Error(`Comando local no soportado: ${cmd}`);
   }
 }
@@ -310,5 +327,30 @@ export const api = {
     remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkMember[]>("list_work_members"),
   captureDashboardAlert: (input: { alertId: string; title: string; detail: string; href: string }) =>
     remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkItem>("capture_dashboard_alert", { input }),
+  listWarehouses: () =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<Warehouse[]>("list_warehouses"),
+  listStockLocations: (warehouseId?: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<StockLocation[]>("list_stock_locations", { warehouse_id: warehouseId }),
+  listStockBalances: (filters?: { product_id?: number; location_id?: number }) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<StockBalance[]>("list_stock_balances", { filters }),
+  listInventoryMovements: (filters?: { product_id?: number; location_id?: number; limit?: number }) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement[]>("list_inventory_movements", { filters }),
+  createInventoryMovement: (input: CreateInventoryMovementInput) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement>("create_inventory_movement", { input }),
+  reverseInventoryMovement: (movementId: number, reason?: string) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement>("reverse_inventory_movement", { movement_id: movementId, reason }),
+
+  list_warehouses: () =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<Warehouse[]>("list_warehouses"),
+  list_stock_locations: (warehouse_id?: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<StockLocation[]>("list_stock_locations", { warehouse_id }),
+  list_stock_balances: (filters?: { product_id?: number; location_id?: number }) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<StockBalance[]>("list_stock_balances", { filters }),
+  list_inventory_movements: (filters?: { product_id?: number; location_id?: number; limit?: number }) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement[]>("list_inventory_movements", { filters }),
+  create_inventory_movement: (input: CreateInventoryMovementInput) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement>("create_inventory_movement", { input }),
+  reverse_inventory_movement: (movement_id: number, reason?: string) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<InventoryMovement>("reverse_inventory_movement", { movement_id, reason }),
   isTauri,
 };

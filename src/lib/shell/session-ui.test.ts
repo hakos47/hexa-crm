@@ -13,6 +13,7 @@ const INV = resolve(__dirname, "../../routes/inventario/+page.svelte");
 const CLI = resolve(__dirname, "../../routes/clientes/+page.svelte");
 const CAJA = resolve(__dirname, "../../routes/caja/+page.svelte");
 const VEN = resolve(__dirname, "../../routes/ventas/+page.svelte");
+const ROADMAP = resolve(__dirname, "../../routes/roadmap/+page.svelte");
 
 describe("session logout UI (#9)", () => {
   const layout = readFileSync(LAYOUT, "utf8");
@@ -71,6 +72,16 @@ describe("shell Spanish commerce copy (#12)", () => {
     expect(sidebar).toContain("/caja?nuevo=1");
     expect(sidebar).toContain("/ventas?nuevo=1");
     expect(dash).toMatch(/inventario\?nuevo=1|caja\?nuevo=1|ventas\?nuevo=1/);
+  });
+
+  it("groups the sidebar by domain and exposes a working roadmap", () => {
+    const roadmap = readFileSync(ROADMAP, "utf8");
+    expect(sidebar).toContain('label: "OPERACIÓN"');
+    expect(sidebar).toContain('label: "FINANZAS"');
+    expect(sidebar).toContain('label: "PROYECTOS"');
+    expect(sidebar).toContain('href: "/roadmap"');
+    expect(roadmap).toContain("Roadmap de trabajo");
+    expect(roadmap).toContain("api.listWorkItems");
   });
 });
 

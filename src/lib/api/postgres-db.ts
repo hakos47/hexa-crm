@@ -24,10 +24,12 @@ import type {
   CashInput,
   CashMovement,
   Company,
+  CreateInventoryMovementInput,
   CreateUserResult,
   Customer,
   CustomerInput,
   DashboardStats,
+  InventoryMovement,
   LoginResult,
   Product,
   ProductInput,
@@ -39,9 +41,12 @@ import type {
   Sale,
   SaleLineInput,
   Settings,
+  StockBalance,
+  StockLocation,
   TenantPlugin,
   UserInput,
   VatSummary,
+  Warehouse,
   WorkCategory,
   WorkItem,
   WorkItemFilters,
@@ -538,6 +543,90 @@ export async function initDb() {
     await sql.unsafe(`CREATE POLICY ${policy} ON ${table} USING (company_id = NULLIF(current_setting('app.company_id', true), '')::integer) WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::integer)`);
   }
 
+  // --- Inventory Foundation (Phase 1) ---
+  await sql`
+    CREATE TABLE IF NOT EXISTS warehouses (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      is_default BOOLEAN NOT NULL DEFAULT FALSE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      UNIQUE(company_id, code)
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS stock_locations (
+      id SERIAL PRIMARY KEY,
+      warehouse_id INTEGER NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      is_default BOOLEAN NOT NULL DEFAULT FALSE,
+      allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      UNIQUE(company_id, warehouse_id, code)
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS stock_balances (
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      location_id INTEGER NOT NULL REFERENCES stock_locations(id) ON DELETE CASCADE,
+      on_hand INTEGER NOT NULL DEFAULT 0,
+      reserved INTEGER NOT NULL DEFAULT 0,
+      blocked INTEGER NOT NULL DEFAULT 0,
+      incoming INTEGER NOT NULL DEFAULT 0,
+      available INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (company_id, product_id, location_id)
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+      from_location_id INTEGER REFERENCES stock_locations(id) ON DELETE SET NULL,
+      to_location_id INTEGER REFERENCES stock_locations(id) ON DELETE SET NULL,
+      movement_type TEXT NOT NULL,
+      qty INTEGER NOT NULL,
+      cost_cents INTEGER NOT NULL DEFAULT 0,
+      effective_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reason_code TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      ref_type TEXT NOT NULL DEFAULT '',
+      ref_id INTEGER,
+      idempotency_key TEXT,
+      reversed_movement_id INTEGER REFERENCES inventory_movements(id) ON DELETE SET NULL,
+      is_reversal BOOLEAN NOT NULL DEFAULT FALSE
+    );
+  `;
+
+  await sql`CREATE INDEX IF NOT EXISTS idx_warehouses_company ON warehouses(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_stock_locations_company ON stock_locations(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_stock_locations_warehouse ON stock_locations(warehouse_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_stock_balances_product ON stock_balances(company_id, product_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_inventory_movements_company ON inventory_movements(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_inventory_movements_product ON inventory_movements(company_id, product_id)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_movements_idempotency ON inventory_movements(company_id, idempotency_key) WHERE idempotency_key IS NOT NULL`;
+
+  for (const table of ["warehouses", "stock_locations", "stock_balances", "inventory_movements"] as const) {
+    const policy = `${table}_tenant_isolation`;
+    await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
+    await sql.unsafe(`CREATE POLICY ${policy} ON ${table} USING (company_id = NULLIF(current_setting('app.company_id', true), '')::integer) WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::integer)`);
+  }
+
   // The local demo keeps its seed data. A central tenant service must start empty
   // and be provisioned explicitly; it must never leak demo rows into a tenant.
   if (!CENTRAL_MODE) {
@@ -546,8 +635,74 @@ export async function initDb() {
     await seedCompaniesPg();
     await seedProductsAndCustomers();
   }
+
+  await seedInventoryFoundation();
+
   await sql`INSERT INTO schema_migrations (version) VALUES (${CENTRAL_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`;
   await sql`INSERT INTO schema_migrations (version) VALUES ('0015_work_management') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0016_inventory_foundation') ON CONFLICT (version) DO NOTHING`;
+}
+
+async function seedInventoryFoundation() {
+  const companies = await sql<{ id: number }[]>`SELECT id FROM companies`;
+  for (const c of companies) {
+    const companyId = c.id;
+
+    // Ensure default warehouse ("Almacén Principal", code "WH-MAIN")
+    const whRows = await sql<{ id: number }[]>`
+      INSERT INTO warehouses (company_id, code, name, is_default, active)
+      VALUES (${companyId}, 'WH-MAIN', 'Almacén Principal', TRUE, TRUE)
+      ON CONFLICT (company_id, code) DO UPDATE SET is_default = TRUE, updated_at = NOW()
+      RETURNING id
+    `;
+    let warehouseId = whRows[0]?.id;
+    if (!warehouseId) {
+      const existingWh = await sql<{ id: number }[]>`SELECT id FROM warehouses WHERE company_id = ${companyId} AND code = 'WH-MAIN'`;
+      warehouseId = existingWh[0]?.id;
+    }
+    if (!warehouseId) continue;
+
+    // Ensure default location ("Ubicación Principal", code "LOC-MAIN")
+    const locRows = await sql<{ id: number }[]>`
+      INSERT INTO stock_locations (warehouse_id, company_id, code, name, is_default, allow_negative_stock, active)
+      VALUES (${warehouseId}, ${companyId}, 'LOC-MAIN', 'Ubicación Principal', TRUE, FALSE, TRUE)
+      ON CONFLICT (company_id, warehouse_id, code) DO UPDATE SET is_default = TRUE, updated_at = NOW()
+      RETURNING id
+    `;
+    let locationId = locRows[0]?.id;
+    if (!locationId) {
+      const existingLoc = await sql<{ id: number }[]>`
+        SELECT id FROM stock_locations WHERE company_id = ${companyId} AND warehouse_id = ${warehouseId} AND code = 'LOC-MAIN'
+      `;
+      locationId = existingLoc[0]?.id;
+    }
+    if (!locationId) continue;
+
+    // For any product with stock > 0, insert/seed initial balance into stock_balances and create an initial_stock movement idempotently.
+    const products = await sql<{ id: number; stock: number; cost_cents: number }[]>`
+      SELECT id, stock, cost_cents FROM products WHERE company_id = ${companyId} AND stock > 0
+    `;
+
+    for (const p of products) {
+      const key = `initial_stock_${companyId}_${p.id}_${locationId}`;
+
+      await sql`
+        INSERT INTO stock_balances (company_id, product_id, location_id, on_hand, reserved, blocked, incoming, available, updated_at)
+        VALUES (${companyId}, ${p.id}, ${locationId}, ${p.stock}, 0, 0, 0, ${p.stock}, NOW())
+        ON CONFLICT (company_id, product_id, location_id) DO NOTHING
+      `;
+
+      await sql`
+        INSERT INTO inventory_movements (
+          company_id, product_id, from_location_id, to_location_id, movement_type, qty, cost_cents, reason_code, notes, idempotency_key
+        )
+        SELECT ${companyId}, ${p.id}, NULL, ${locationId}, 'initial_stock', ${p.stock}, ${p.cost_cents}, 'INITIAL_MIGRATION', 'Migración inicial de stock escalar', ${key}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM inventory_movements WHERE company_id = ${companyId} AND idempotency_key = ${key}
+        )
+      `;
+    }
+  }
 }
 
 async function seedCompaniesPg() {
@@ -2621,4 +2776,382 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
   upsert_work_item(input: WorkItemInput, token?: string | null) { return this.upsertWorkItem(input, token); },
   archive_work_item(id: number, token?: string | null) { return this.archiveWorkItem(id, token); },
   capture_dashboard_alert(input: any, token?: string | null) { return this.captureDashboardAlert(input, token); },
+
+  async list_warehouses(token?: string | null): Promise<Warehouse[]> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+    const rows = await sql`
+      SELECT * FROM warehouses
+      WHERE company_id = ${cid}
+      ORDER BY is_default DESC, name ASC
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      company_id: r.company_id,
+      code: r.code,
+      name: r.name,
+      is_default: !!r.is_default,
+      active: !!r.active,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    }));
+  },
+
+  async list_stock_locations(warehouse_id?: number | null, token?: string | null): Promise<StockLocation[]> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+    const rows = warehouse_id
+      ? await sql`
+          SELECT * FROM stock_locations
+          WHERE company_id = ${cid} AND warehouse_id = ${warehouse_id}
+          ORDER BY is_default DESC, name ASC
+        `
+      : await sql`
+          SELECT * FROM stock_locations
+          WHERE company_id = ${cid}
+          ORDER BY is_default DESC, name ASC
+        `;
+    return rows.map((r) => ({
+      id: r.id,
+      company_id: r.company_id,
+      warehouse_id: r.warehouse_id,
+      code: r.code,
+      name: r.name,
+      location_type: r.location_type || "warehouse",
+      allow_negative_stock: !!r.allow_negative_stock,
+      active: !!r.active,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    }));
+  },
+
+  async list_stock_balances(
+    filters?: { product_id?: number; location_id?: number } | null,
+    token?: string | null,
+  ): Promise<StockBalance[]> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+
+    const productId = filters?.product_id ? Number(filters.product_id) : null;
+    const locationId = filters?.location_id ? Number(filters.location_id) : null;
+
+    const rows = await sql`
+      SELECT sb.*, sl.name as location_name, sl.warehouse_id
+      FROM stock_balances sb
+      LEFT JOIN stock_locations sl ON sb.location_id = sl.id
+      WHERE sb.company_id = ${cid}
+        ${productId ? sql`AND sb.product_id = ${productId}` : sql``}
+        ${locationId ? sql`AND sb.location_id = ${locationId}` : sql``}
+      ORDER BY sb.product_id ASC, sb.location_id ASC
+    `;
+
+    return rows.map((r) => ({
+      company_id: r.company_id,
+      product_id: r.product_id,
+      location_id: r.location_id,
+      location_name: r.location_name || "",
+      warehouse_id: r.warehouse_id,
+      on_hand: r.on_hand ?? 0,
+      reserved: r.reserved ?? 0,
+      blocked: r.blocked ?? 0,
+      incoming: r.incoming ?? 0,
+      available: r.available ?? (r.on_hand ?? 0) - (r.reserved ?? 0) - (r.blocked ?? 0),
+      updated_at: toIso(r.updated_at),
+    }));
+  },
+
+  async list_inventory_movements(
+    filters?: { product_id?: number; location_id?: number; limit?: number } | null,
+    token?: string | null,
+  ): Promise<InventoryMovement[]> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+
+    const productId = filters?.product_id ? Number(filters.product_id) : null;
+    const locationId = filters?.location_id ? Number(filters.location_id) : null;
+    const limitVal = filters?.limit && filters.limit > 0 ? Number(filters.limit) : 200;
+
+    const rows = await sql`
+      SELECT im.*,
+        p.sku as product_sku,
+        p.name as product_name,
+        fl.name as from_location_name,
+        tl.name as to_location_name,
+        u.display_name as created_by_name
+      FROM inventory_movements im
+      LEFT JOIN products p ON im.product_id = p.id
+      LEFT JOIN stock_locations fl ON im.from_location_id = fl.id
+      LEFT JOIN stock_locations tl ON im.to_location_id = tl.id
+      LEFT JOIN users u ON im.actor_id = u.id
+      WHERE im.company_id = ${cid}
+        ${productId ? sql`AND im.product_id = ${productId}` : sql``}
+        ${locationId ? sql`AND (im.from_location_id = ${locationId} OR im.to_location_id = ${locationId})` : sql``}
+      ORDER BY im.created_at DESC, im.id DESC
+      LIMIT ${limitVal}
+    `;
+
+    return rows.map((r) => ({
+      id: r.id,
+      company_id: r.company_id,
+      product_id: r.product_id,
+      product_sku: r.product_sku || "",
+      product_name: r.product_name || "",
+      movement_type: r.movement_type,
+      reason: r.reason_code || "",
+      quantity: r.qty ?? 0,
+      from_location_id: r.from_location_id,
+      to_location_id: r.to_location_id,
+      from_location_name: r.from_location_name || null,
+      to_location_name: r.to_location_name || null,
+      unit_cost_cents: r.cost_cents ?? 0,
+      reference_type: r.ref_type || null,
+      reference_id: r.ref_id,
+      reversed_movement_id: r.reversed_movement_id,
+      is_reversal: !!r.is_reversal,
+      notes: r.notes || null,
+      created_by: r.actor_id,
+      created_by_name: r.created_by_name || null,
+      created_at: toIso(r.created_at),
+    }));
+  },
+
+  async create_inventory_movement(input: CreateInventoryMovementInput | any, token?: string | null): Promise<InventoryMovement> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = input.company_id ? Number(input.company_id) : await resolveActiveCompanyId(token, user.id);
+
+    const productId = Number(input.product_id);
+    if (!productId) throw new Error("product_id es requerido");
+
+    const qty = Number(input.quantity ?? input.qty);
+    if (!qty || qty <= 0 || !Number.isFinite(qty)) {
+      throw new Error("La cantidad debe ser un número entero mayor que 0");
+    }
+
+    const movementType = String(input.movement_type);
+    const idempotencyKey = input.idempotency_key ? String(input.idempotency_key) : null;
+
+    return await sql.begin(async (tx) => {
+      if (idempotencyKey) {
+        const existing = await tx`
+          SELECT im.*,
+            p.sku as product_sku, p.name as product_name,
+            fl.name as from_location_name, tl.name as to_location_name,
+            u.display_name as created_by_name
+          FROM inventory_movements im
+          LEFT JOIN products p ON im.product_id = p.id
+          LEFT JOIN stock_locations fl ON im.from_location_id = fl.id
+          LEFT JOIN stock_locations tl ON im.to_location_id = tl.id
+          LEFT JOIN users u ON im.actor_id = u.id
+          WHERE im.company_id = ${cid} AND im.idempotency_key = ${idempotencyKey}
+        `;
+        if (existing.length > 0) {
+          const r = existing[0];
+          return {
+            id: r.id,
+            company_id: r.company_id,
+            product_id: r.product_id,
+            product_sku: r.product_sku || "",
+            product_name: r.product_name || "",
+            movement_type: r.movement_type,
+            reason: r.reason_code || "",
+            quantity: r.qty ?? 0,
+            from_location_id: r.from_location_id,
+            to_location_id: r.to_location_id,
+            from_location_name: r.from_location_name || null,
+            to_location_name: r.to_location_name || null,
+            unit_cost_cents: r.cost_cents ?? 0,
+            reference_type: r.ref_type || null,
+            reference_id: r.ref_id,
+            reversed_movement_id: r.reversed_movement_id,
+            is_reversal: !!r.is_reversal,
+            notes: r.notes || null,
+            created_by: r.actor_id,
+            created_by_name: r.created_by_name || null,
+            created_at: toIso(r.created_at),
+          };
+        }
+      }
+
+      const prodRes = await tx`SELECT id, cost_cents FROM products WHERE id = ${productId} AND company_id = ${cid}`;
+      if (prodRes.length === 0) throw new Error("Producto no encontrado en la empresa");
+
+      let fromLocationId = input.from_location_id ? Number(input.from_location_id) : null;
+      let toLocationId = input.to_location_id ? Number(input.to_location_id) : null;
+
+      if (movementType === "in" || movementType === "initial_stock") {
+        if (!toLocationId) {
+          const defaultLoc = await tx`SELECT id FROM stock_locations WHERE company_id = ${cid} AND is_default = TRUE LIMIT 1`;
+          toLocationId = defaultLoc[0]?.id ?? null;
+        }
+      } else if (movementType === "out") {
+        if (!fromLocationId) {
+          const defaultLoc = await tx`SELECT id FROM stock_locations WHERE company_id = ${cid} AND is_default = TRUE LIMIT 1`;
+          fromLocationId = defaultLoc[0]?.id ?? null;
+        }
+      }
+
+      const reasonCode = String(input.reason ?? input.reason_code ?? "other");
+      const costCents = input.unit_cost_cents != null ? Number(input.unit_cost_cents) : (input.cost_cents != null ? Number(input.cost_cents) : prodRes[0].cost_cents ?? 0);
+      const notes = input.notes ? String(input.notes) : "";
+      const refType = input.reference_type ?? input.ref_type ?? "";
+      const refId = input.reference_id ?? input.ref_id ?? null;
+      const isReversal = !!input.is_reversal;
+      const reversedMovementId = input.reversed_movement_id ? Number(input.reversed_movement_id) : null;
+
+      const insertedMovements = await tx`
+        INSERT INTO inventory_movements (
+          company_id, product_id, from_location_id, to_location_id, movement_type, qty, cost_cents,
+          effective_at, created_at, actor_id, reason_code, notes, ref_type, ref_id, idempotency_key,
+          reversed_movement_id, is_reversal
+        ) VALUES (
+          ${cid}, ${productId}, ${fromLocationId}, ${toLocationId}, ${movementType}, ${qty}, ${costCents},
+          NOW(), NOW(), ${user.id}, ${reasonCode}, ${notes}, ${refType}, ${refId ? Number(refId) : null}, ${idempotencyKey},
+          ${reversedMovementId}, ${isReversal}
+        )
+        RETURNING *
+      `;
+      const mov = insertedMovements[0];
+
+      if (fromLocationId) {
+        await tx`
+          INSERT INTO stock_balances (company_id, product_id, location_id, on_hand, reserved, blocked, incoming, available, updated_at)
+          VALUES (${cid}, ${productId}, ${fromLocationId}, 0, 0, 0, 0, 0, NOW())
+          ON CONFLICT (company_id, product_id, location_id) DO NOTHING
+        `;
+        const updateFrom = await tx`
+          UPDATE stock_balances
+          SET on_hand = on_hand - ${qty}, available = available - ${qty}, updated_at = NOW()
+          WHERE company_id = ${cid} AND product_id = ${productId} AND location_id = ${fromLocationId}
+          RETURNING *
+        `;
+        const bal = updateFrom[0];
+
+        const locRes = await tx`SELECT allow_negative_stock FROM stock_locations WHERE id = ${fromLocationId}`;
+        const allowNeg = input.allow_negative_stock === true || !!locRes[0]?.allow_negative_stock;
+        if (!allowNeg && (bal?.available < 0 || bal?.on_hand < 0)) {
+          throw new Error(`Stock insuficiente en ubicación origen (disponible: ${bal?.available ?? 0})`);
+        }
+      }
+
+      if (toLocationId) {
+        await tx`
+          INSERT INTO stock_balances (company_id, product_id, location_id, on_hand, reserved, blocked, incoming, available, updated_at)
+          VALUES (${cid}, ${productId}, ${toLocationId}, ${qty}, 0, 0, 0, ${qty}, NOW())
+          ON CONFLICT (company_id, product_id, location_id)
+          DO UPDATE SET
+            on_hand = stock_balances.on_hand + ${qty},
+            available = stock_balances.available + ${qty},
+            updated_at = NOW()
+          RETURNING *
+        `;
+      }
+
+      await tx`
+        UPDATE products
+        SET stock = COALESCE((
+          SELECT SUM(on_hand)::int FROM stock_balances WHERE company_id = ${cid} AND product_id = ${productId}
+        ), 0),
+        updated_at = NOW()
+        WHERE id = ${productId} AND company_id = ${cid}
+      `;
+
+      const [fromLoc, toLoc, prodInfo] = await Promise.all([
+        fromLocationId ? tx`SELECT name FROM stock_locations WHERE id = ${fromLocationId}` : Promise.resolve([]),
+        toLocationId ? tx`SELECT name FROM stock_locations WHERE id = ${toLocationId}` : Promise.resolve([]),
+        tx`SELECT sku, name FROM products WHERE id = ${productId}`,
+      ]);
+
+      return {
+        id: mov.id,
+        company_id: mov.company_id,
+        product_id: mov.product_id,
+        product_sku: prodInfo[0]?.sku || "",
+        product_name: prodInfo[0]?.name || "",
+        movement_type: mov.movement_type,
+        reason: mov.reason_code || "",
+        quantity: mov.qty ?? 0,
+        from_location_id: mov.from_location_id,
+        to_location_id: mov.to_location_id,
+        from_location_name: fromLoc[0]?.name || null,
+        to_location_name: toLoc[0]?.name || null,
+        unit_cost_cents: mov.cost_cents ?? 0,
+        reference_type: mov.ref_type || null,
+        reference_id: mov.ref_id,
+        reversed_movement_id: mov.reversed_movement_id,
+        is_reversal: !!mov.is_reversal,
+        notes: mov.notes || null,
+        created_by: mov.actor_id,
+        created_by_name: user.display_name,
+        created_at: toIso(mov.created_at),
+      };
+    });
+  },
+
+  async reverse_inventory_movement(
+    movement_id: number,
+    reason?: string,
+    token?: string | null,
+  ): Promise<InventoryMovement> {
+    const user = await requireSession(token ?? null);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+
+    const origRes = await sql`
+      SELECT * FROM inventory_movements WHERE id = ${movement_id} AND company_id = ${cid}
+    `;
+    if (origRes.length === 0) throw new Error("Movimiento de inventario no encontrado");
+    const orig = origRes[0];
+
+    if (orig.is_reversal) {
+      throw new Error("No se puede anular una reversión de movimiento");
+    }
+
+    const existingReversal = await sql`
+      SELECT id FROM inventory_movements WHERE company_id = ${cid} AND reversed_movement_id = ${movement_id}
+    `;
+    if (existingReversal.length > 0) {
+      const revMovements = await this.list_inventory_movements({ product_id: orig.product_id, limit: 100 }, token);
+      const found = revMovements.find((m) => m.id === existingReversal[0].id);
+      if (found) return found;
+    }
+
+    const compensatoryFrom = orig.to_location_id;
+    const compensatoryTo = orig.from_location_id;
+
+    let compType: string = "reversal";
+    if (orig.movement_type === "in") compType = "out";
+    else if (orig.movement_type === "out") compType = "in";
+    else if (orig.movement_type === "transfer") compType = "transfer";
+
+    const reversalInput = {
+      company_id: cid,
+      product_id: orig.product_id,
+      movement_type: compType,
+      quantity: orig.qty,
+      from_location_id: compensatoryFrom,
+      to_location_id: compensatoryTo,
+      unit_cost_cents: orig.cost_cents,
+      reason: reason || "movement_reversal",
+      notes: `Reversión de movimiento #${orig.id}${orig.notes ? ` (${orig.notes})` : ""}`,
+      reference_type: orig.ref_type,
+      reference_id: orig.ref_id,
+      idempotency_key: `reversal_${orig.id}`,
+      reversed_movement_id: orig.id,
+      is_reversal: true,
+    };
+
+    return await this.create_inventory_movement(reversalInput, token);
+  },
+
+  listWarehouses(token?: string | null) { return this.list_warehouses(token); },
+  listStockLocations(warehouse_id?: number | null, token?: string | null) { return this.list_stock_locations(warehouse_id, token); },
+  listStockBalances(filters?: { product_id?: number; location_id?: number } | null, token?: string | null) { return this.list_stock_balances(filters, token); },
+  listInventoryMovements(filters?: { product_id?: number; location_id?: number; limit?: number } | null, token?: string | null) { return this.list_inventory_movements(filters, token); },
+  createInventoryMovement(input: any, token?: string | null) { return this.create_inventory_movement(input, token); },
+  reverseInventoryMovement(movement_id: number, reason?: string, token?: string | null) { return this.reverse_inventory_movement(movement_id, reason, token); },
 };

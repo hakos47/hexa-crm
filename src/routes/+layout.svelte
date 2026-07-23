@@ -54,6 +54,10 @@
       title: "Trabajo",
       subtitle: "Bandeja de tareas, incidencias e hitos",
     },
+    "/roadmap": {
+      title: "Roadmap",
+      subtitle: "Prioridades y fechas de los proyectos",
+    },
     "/inventario": {
       title: "Inventario",
       subtitle: "Productos, stock y alertas",

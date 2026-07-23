@@ -19,15 +19,39 @@
   const collapsed = $derived(forceExpanded ? false : $sidebarCollapsed);
   const showWork = $derived(api.supportsWorkManagement());
 
-  const links = $derived([
-    { href: "/", label: "Pulso", icon: "⌁" },
-    ...(showWork ? [{ href: "/trabajo", label: "Trabajo", icon: "☑" }] : []),
-    { href: "/inventario", label: "Inventario", icon: "□" },
-    { href: "/ventas", label: "Ventas", icon: "○" },
-    { href: "/caja", label: "Caja", icon: "€" },
-    { href: "/clientes", label: "Clientes", icon: "◇" },
-    { href: "/impuestos", label: "Impuestos", icon: "%" },
-    { href: "/ajustes", label: "Ajustes", icon: "⚙" },
+  const navigationGroups = $derived([
+    {
+      label: "VISIÓN",
+      links: [{ href: "/", label: "Pulso", icon: "⌁" }],
+    },
+    {
+      label: "OPERACIÓN",
+      links: [
+        { href: "/ventas", label: "Ventas", icon: "○" },
+        { href: "/inventario", label: "Inventario", icon: "□" },
+        { href: "/clientes", label: "Clientes", icon: "◇" },
+      ],
+    },
+    {
+      label: "FINANZAS",
+      links: [
+        { href: "/caja", label: "Caja", icon: "€" },
+        { href: "/impuestos", label: "Impuestos", icon: "%" },
+      ],
+    },
+    ...(showWork
+      ? [{
+          label: "PROYECTOS",
+          links: [
+            { href: "/trabajo", label: "Trabajo", icon: "☑" },
+            { href: "/roadmap", label: "Roadmap", icon: "↗" },
+          ],
+        }]
+      : []),
+    {
+      label: "SISTEMA",
+      links: [{ href: "/ajustes", label: "Ajustes", icon: "⚙" }],
+    },
   ]);
 
   /** Deep-links that open create flows (?nuevo=1). */
@@ -74,33 +98,39 @@
   </div>
 
   <div class="flex-1 overflow-y-auto p-3">
-    {#if !collapsed}
-      <p class="section-label mb-3 px-2">ESPACIOS</p>
-    {/if}
     <nav class="space-y-0.5" aria-label="Navegación principal">
-      {#each links as link}
-        <a
-          href={link.href}
-          onclick={nav}
-          class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200 {active(
-            link.href,
-            $page.url.pathname
-          )
-            ? 'nav-active'
-            : 'text-[var(--color-muted)] hover:bg-purple-500/[0.08] hover:text-[var(--color-purple-bright)]'}"
-          title={link.label}
-        >
-          <span
-            class="w-5 text-center text-base opacity-90 {active(link.href, $page.url.pathname)
-              ? 'text-radiant'
-              : ''}"
-          >
-            {link.icon}
-          </span>
+      {#each navigationGroups as group, groupIndex}
+        <section class:mt-4={groupIndex > 0} aria-label={group.label}>
           {#if !collapsed}
-            <span class="font-medium">{link.label}</span>
+            <p class="section-label mb-2 px-2">{group.label}</p>
           {/if}
-        </a>
+          <div class="space-y-0.5">
+            {#each group.links as link}
+              <a
+                href={link.href}
+                onclick={nav}
+                class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-200 {active(
+                  link.href,
+                  $page.url.pathname
+                )
+                  ? 'nav-active'
+                  : 'text-[var(--color-muted)] hover:bg-purple-500/[0.08] hover:text-[var(--color-purple-bright)]'}"
+                title={link.label}
+              >
+                <span
+                  class="w-5 text-center text-base opacity-90 {active(link.href, $page.url.pathname)
+                    ? 'text-radiant'
+                    : ''}"
+                >
+                  {link.icon}
+                </span>
+                {#if !collapsed}
+                  <span class="font-medium">{link.label}</span>
+                {/if}
+              </a>
+            {/each}
+          </div>
+        </section>
       {/each}
     </nav>
 
