@@ -19,6 +19,9 @@ import type {
   InventoryMovementType,
   InventoryReason,
   LoginResult,
+  PluginConfig,
+  PluginKey,
+  PluginTestResult,
   Product,
   ProductInput,
   Sale,
@@ -26,6 +29,7 @@ import type {
   Settings,
   StockBalance,
   StockLocation,
+  TenantPlugin,
   UserInput,
   UserRole,
   VatSummary,
@@ -38,6 +42,11 @@ import type {
   WorkProject,
   WorkProjectInput,
 } from "../types";
+import {
+  PLUGIN_CATALOG,
+  pluginDefinition,
+  sanitizePluginConfig,
+} from "../plugins/catalog";
 import {
   billingByCompany,
   canAccessCompany,
@@ -95,6 +104,15 @@ type SessionRec = {
   active_company_id: number | null;
 };
 
+type StoredTenantPlugin = {
+  company_id: number;
+  plugin_key: PluginKey;
+  enabled: boolean;
+  config: PluginConfig;
+  last_error?: string | null;
+  updated_at?: string | null;
+};
+
 type Store = {
   companies: Company[];
   company_members: CompanyMember[];
@@ -117,6 +135,7 @@ type Store = {
   workCategories: WorkCategory[];
   workProjects: WorkProject[];
   workItems: WorkItem[];
+  tenantPlugins?: StoredTenantPlugin[];
   users: StoredUser[];
   sessions: Record<string, SessionRec>;
   settings: Settings;
@@ -297,6 +316,7 @@ function seed(): Store {
     workCategories: [],
     workProjects: [],
     workItems: [],
+    tenantPlugins: [],
     users: [],
     sessions: {},
     settings: defaultSettings(),
@@ -338,6 +358,7 @@ function load(): Store {
     if (!memoryStore.workCategories) memoryStore.workCategories = [];
     if (!memoryStore.workProjects) memoryStore.workProjects = [];
     if (!memoryStore.workItems) memoryStore.workItems = [];
+    if (!memoryStore.tenantPlugins) memoryStore.tenantPlugins = [];
     if (memoryStore.seq.warehouse == null) memoryStore.seq.warehouse = 0;
     if (memoryStore.seq.stockLocation == null) memoryStore.seq.stockLocation = 0;
     if (memoryStore.seq.inventoryMovement == null) memoryStore.seq.inventoryMovement = 0;
@@ -378,6 +399,7 @@ function load(): Store {
     if (!parsed.workCategories) parsed.workCategories = [];
     if (!parsed.workProjects) parsed.workProjects = [];
     if (!parsed.workItems) parsed.workItems = [];
+    if (!parsed.tenantPlugins) parsed.tenantPlugins = [];
     if (!parsed.seq) {
       parsed.seq = {
         product: 0,
@@ -713,6 +735,29 @@ function dayKey(iso: string) {
 
 function monthKey(iso: string) {
   return iso.slice(0, 7);
+}
+
+function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantPlugin {
+  const definition = pluginDefinition(key);
+  const stored = (s.tenantPlugins || []).find(
+    (p) => p.company_id === companyId && p.plugin_key === key,
+  );
+  const config = sanitizePluginConfig(key, stored?.config ?? definition.defaultConfig);
+  const enabled = !!stored?.enabled;
+  const secretConfigured = true;
+  return {
+    plugin_key: key,
+    name: definition.name,
+    description: definition.description,
+    category: definition.category,
+    capabilities: [...definition.capabilities],
+    enabled,
+    config,
+    secret_configured: secretConfigured,
+    status: !enabled ? "inactive" : stored?.last_error ? "error" : "ready",
+    last_error: stored?.last_error ?? null,
+    updated_at: stored?.updated_at ?? null,
+  };
 }
 
 export const browserApi = {
@@ -2446,5 +2491,81 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     requireAdmin(s, token);
     const { sessions: _s, ...rest } = s;
     return createPreMigrationBackup({ ...rest, sessions: {} }, reason);
+  },
+
+  async list_plugins(token?: string | null): Promise<TenantPlugin[]> {
+    const s = load();
+    const companyId = sessionCompanyId(s, token);
+    return PLUGIN_CATALOG.map((plugin) => tenantPluginLocal(s, companyId, plugin.key));
+  },
+
+  async update_plugin(
+    pluginKey: PluginKey,
+    enabled: boolean,
+    inputConfig: unknown,
+    token?: string | null,
+  ): Promise<TenantPlugin> {
+    const s = load();
+    requireAdmin(s, token);
+    const companyId = sessionCompanyId(s, token);
+    pluginDefinition(pluginKey);
+    const config = sanitizePluginConfig(pluginKey, inputConfig);
+    if (!s.tenantPlugins) s.tenantPlugins = [];
+    const index = s.tenantPlugins.findIndex(
+      (p) => p.company_id === companyId && p.plugin_key === pluginKey,
+    );
+    const updatedRecord: StoredTenantPlugin = {
+      company_id: companyId,
+      plugin_key: pluginKey,
+      enabled,
+      config,
+      last_error: null,
+      updated_at: now(),
+    };
+    if (index >= 0) {
+      s.tenantPlugins[index] = updatedRecord;
+    } else {
+      s.tenantPlugins.push(updatedRecord);
+    }
+    save(s);
+    return tenantPluginLocal(s, companyId, pluginKey);
+  },
+
+  async test_plugin(
+    pluginKey: PluginKey,
+    token?: string | null,
+  ): Promise<PluginTestResult> {
+    const s = load();
+    requireAdmin(s, token);
+    const companyId = sessionCompanyId(s, token);
+    pluginDefinition(pluginKey);
+    const plugin = tenantPluginLocal(s, companyId, pluginKey);
+    if (!plugin.enabled) {
+      throw new Error("Activa y guarda el plugin antes de probarlo");
+    }
+
+    if (!s.tenantPlugins) s.tenantPlugins = [];
+    const stored = s.tenantPlugins.find(
+      (p) => p.company_id === companyId && p.plugin_key === pluginKey,
+    );
+    if (stored) {
+      stored.last_error = null;
+      stored.updated_at = now();
+      save(s);
+    }
+
+    if (pluginKey === "database_bridge") {
+      return {
+        ok: true,
+        message: `Simulación local: Conexión simulada con éxito a ${plugin.config.display_name || "Base de datos externa"}`,
+        details: { mode: "local", simulation: true, access_mode: plugin.config.access_mode },
+      };
+    }
+
+    return {
+      ok: true,
+      message: `Simulación local: Stripe MCP simulado en entorno ${plugin.config.environment ?? "sandbox"}`,
+      details: { mode: "local", simulation: true, environment: plugin.config.environment ?? "sandbox" },
+    };
   },
 };

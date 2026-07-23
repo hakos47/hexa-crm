@@ -126,6 +126,9 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "dashboard_stats": return browserApi.dashboard_stats(token) as T;
     case "get_settings": return browserApi.get_settings(token) as T;
     case "update_settings": return browserApi.update_settings(args.partial, token) as T;
+    case "list_plugins": return browserApi.list_plugins(token) as Promise<T>;
+    case "update_plugin": return browserApi.update_plugin(args.plugin_key, args.enabled, args.config, token) as Promise<T>;
+    case "test_plugin": return browserApi.test_plugin(args.plugin_key, token) as Promise<T>;
     case "ai_chat": return browserApi.ai_chat(args.messages, token) as Promise<T>;
     case "ollama_health": return browserApi.ollama_health(token) as Promise<T>;
     case "reset_demo": return browserApi.reset_demo(token) as Promise<T>;
