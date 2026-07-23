@@ -1,6 +1,11 @@
 import postgres from "postgres";
 import type { PluginConfig, PluginTestResult, PluginToolResult } from "../types";
-import { STRIPE_MCP_URL } from "./catalog";
+import {
+  pluginSecretConfigured as stripePluginSecretConfigured,
+  listStripeTools as vendorListStripeTools,
+  testStripePlugin as vendorTestStripePlugin,
+  callStripeTool as vendorCallStripeTool,
+} from "../../../vendor/hexa-crm-plugins/plugins/stripe/src/index";
 
 function secretFromEnv(ref: unknown): string {
   const name = String(ref ?? "");
@@ -10,7 +15,10 @@ function secretFromEnv(ref: unknown): string {
 }
 
 export function pluginSecretConfigured(config: PluginConfig, kind: "database" | "stripe"): boolean {
-  const ref = kind === "database" ? config.database_url_env : config.credential_env;
+  if (kind === "stripe") {
+    return stripePluginSecretConfigured(config as any);
+  }
+  const ref = config.database_url_env;
   return !!(ref && typeof process !== "undefined" && process.env[String(ref)]);
 }
 
@@ -32,70 +40,12 @@ export async function testDatabasePlugin(config: PluginConfig): Promise<PluginTe
   }
 }
 
-function parseMcpBody(raw: string): unknown {
-  const lines = raw.split(/\r?\n/).filter((line) => line.startsWith("data:"));
-  const json = lines.length ? lines.at(-1)!.slice(5).trim() : raw.trim();
-  return json ? JSON.parse(json) : {};
-}
-
-async function stripeMcpRequest(
-  token: string,
-  payload: unknown,
-  sessionId?: string | null,
-): Promise<{ result: any; sessionId: string | null }> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
-    "MCP-Protocol-Version": "2025-03-26",
-  };
-  if (sessionId) headers["Mcp-Session-Id"] = sessionId;
-  const response = await fetch(STRIPE_MCP_URL, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(12_000),
-  });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`Stripe MCP respondió HTTP ${response.status}`);
-  const parsed = body.trim() ? parseMcpBody(body) as any : {};
-  if (parsed?.error) throw new Error(parsed.error.message || "Stripe MCP rechazó la petición");
-  return { result: parsed?.result ?? parsed, sessionId: response.headers.get("mcp-session-id") ?? sessionId ?? null };
-}
-
-async function stripeMcp(config: PluginConfig, method: string, params?: unknown): Promise<any> {
-  const token = secretFromEnv(config.credential_env);
-  const initialized = await stripeMcpRequest(token, {
-    jsonrpc: "2.0",
-    id: crypto.randomUUID(),
-    method: "initialize",
-    params: {
-      protocolVersion: "2025-03-26",
-      capabilities: {},
-      clientInfo: { name: "hexa-crm", version: "0.2.0" },
-    },
-  });
-  await stripeMcpRequest(
-    token,
-    { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
-    initialized.sessionId,
-  );
-  const response = await stripeMcpRequest(
-    token,
-    { jsonrpc: "2.0", id: crypto.randomUUID(), method, params },
-    initialized.sessionId,
-  );
-  return response.result;
-}
-
 export async function listStripeTools(config: PluginConfig): Promise<any[]> {
-  const result = await stripeMcp(config, "tools/list", {});
-  return Array.isArray(result?.tools) ? result.tools : [];
+  return vendorListStripeTools(config as any);
 }
 
 export async function testStripePlugin(config: PluginConfig): Promise<PluginTestResult> {
-  const tools = await listStripeTools(config);
-  return { ok: true, message: `Stripe MCP conectado: ${tools.length} herramientas disponibles`, details: { tools: tools.length } };
+  return vendorTestStripePlugin(config as any);
 }
 
 export async function callStripeTool(
@@ -103,6 +53,5 @@ export async function callStripeTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<PluginToolResult> {
-  const result = await stripeMcp(config, "tools/call", { name, arguments: args });
-  return { ok: true, plugin_key: "stripe_mcp", tool_name: name, result };
+  return vendorCallStripeTool(config as any, name, args) as Promise<PluginToolResult>;
 }

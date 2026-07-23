@@ -94,15 +94,21 @@ flowchart TD
 
 ## 5. Estrategia de Transición para Plugins Existentes
 
-Los plugins actuales integrados directamente en el CRM Host (`database_bridge` y `stripe_mcp`) se mantienen in-tree hasta completar la transición, siguiendo este plan de migración:
+Los plugins del sistema siguen un proceso estructurado de extracción:
 
-- **Estado Actual**: Implementación in-tree en `src/lib/plugins/` (`catalog.ts`, `runtime.server.ts`, `postgres-db.ts`), donde `database_bridge` y `stripe_mcp` continúan in-tree y operativos.
-- **Fase 1 (Planificada)**: Extracción del código fuente de `database_bridge` y `stripe_mcp` hacia repositorios dedicados aún por designar, con sus URLs y pins estables pendientes de aprobación.
-- **Fase 2 (Planificada)**: Inserción de los submódulos en `git@github.com:HEXA-NIX/hexa-crm-plugins.git` bajo control de versiones y auditoría.
-- **Fase 3 (Planificada)**: Sustitución de los handlers in-tree por la carga estática vinculada al agregador.
+- **Stripe MCP (`stripe_mcp`)**: Extraído e integrado mediante `vendor/hexa-crm-plugins` -> `plugins/stripe`, con el agregador y la plantilla del plugin pinneados por SHA de commit inmutable.
+- **Base de datos externa (`database_bridge`)**: Permanece in-tree en `src/lib/plugins/` (`catalog.ts`, `runtime.server.ts`, `postgres-db.ts`) y plenamente operativo hasta completar la siguiente fase de migración.
 
-> [!WARNING]
-> Esta transición se encuentra en **fase de diseño y desarrollo activo**. El código in-tree de `database_bridge` y `stripe_mcp` permanece in-tree y plenamente operativo hasta completar la extracción y validación de las puertas de seguridad.
+### Operación con Submódulos
+
+Para inicializar o sincronizar el agregador y los plugins vinculados, asegúrese de ejecutar:
+
+```bash
+git submodule update --init --recursive
+```
+
+> [!NOTE]
+> La extracción del plugin `stripe_mcp` al agregador externo ha finalizado con éxito bajo fijación estricta por SHA. El plugin `database_bridge` permanece in-tree hasta su correspondiente extracción.
 
 ---
 

@@ -1,4 +1,19 @@
 import type { PluginConfig, PluginKey } from "../types";
+import {
+  STRIPE_MCP_URL,
+  STRIPE_PLUGIN_CATALOG_ENTRY,
+  STRIPE_READ_TOOLS,
+  STRIPE_WRITE_TOOLS,
+  sanitizeStripeConfig,
+  stripeToolAccess as vendorStripeToolAccess,
+} from "../../../vendor/hexa-crm-plugins/plugins/stripe/src/index";
+
+export { STRIPE_MCP_URL, STRIPE_READ_TOOLS, STRIPE_WRITE_TOOLS };
+
+export function stripeToolAccess(toolName: string, config: PluginConfig) {
+  return vendorStripeToolAccess(toolName, config as any);
+}
+
 
 export type PluginCatalogEntry = {
   key: PluginKey;
@@ -8,8 +23,6 @@ export type PluginCatalogEntry = {
   capabilities: string[];
   defaultConfig: PluginConfig;
 };
-
-export const STRIPE_MCP_URL = "https://mcp.stripe.com";
 
 export const PLUGIN_CATALOG: readonly PluginCatalogEntry[] = [
   {
@@ -24,52 +37,8 @@ export const PLUGIN_CATALOG: readonly PluginCatalogEntry[] = [
       access_mode: "read_only",
     },
   },
-  {
-    key: "stripe_mcp",
-    name: "Stripe MCP",
-    description: "Da al asistente herramientas oficiales de Stripe para consultar y operar la cuenta.",
-    category: "pagos",
-    capabilities: ["Saldo, clientes y pagos", "Facturas y enlaces de pago", "Operaciones con confirmación"],
-    defaultConfig: {
-      mcp_url: STRIPE_MCP_URL,
-      credential_env: "HEXA_STRIPE_SHOP_TOKEN",
-      environment: "sandbox",
-      allow_write_tools: false,
-      require_approval: true,
-    },
-  },
+  STRIPE_PLUGIN_CATALOG_ENTRY,
 ] as const;
-
-export const STRIPE_READ_TOOLS = new Set([
-  "get_stripe_account_info",
-  "retrieve_balance",
-  "list_coupons",
-  "list_customers",
-  "list_disputes",
-  "list_invoices",
-  "list_payment_intents",
-  "list_prices",
-  "list_products",
-  "list_subscriptions",
-  "search_stripe_resources",
-  "fetch_stripe_resources",
-  "search_stripe_documentation",
-]);
-
-export const STRIPE_WRITE_TOOLS = new Set([
-  "create_coupon",
-  "create_customer",
-  "update_dispute",
-  "create_invoice",
-  "create_invoice_item",
-  "finalize_invoice",
-  "create_payment_link",
-  "create_price",
-  "create_product",
-  "create_refund",
-  "cancel_subscription",
-  "update_subscription",
-]);
 
 export function pluginDefinition(key: unknown): PluginCatalogEntry {
   const found = PLUGIN_CATALOG.find((plugin) => plugin.key === key);
@@ -86,7 +55,7 @@ function cleanEnvRef(value: unknown, fallback: string, prefix: string): string {
 }
 
 export function sanitizePluginConfig(key: PluginKey, input: unknown): PluginConfig {
-  const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
   if (key === "database_bridge") {
     return {
       display_name: String(raw.display_name ?? "Base de datos de la tienda").trim().slice(0, 80),
@@ -98,21 +67,5 @@ export function sanitizePluginConfig(key: PluginKey, input: unknown): PluginConf
       access_mode: raw.access_mode === "read_write" ? "read_write" : "read_only",
     };
   }
-  return {
-    mcp_url: STRIPE_MCP_URL,
-    credential_env: cleanEnvRef(raw.credential_env, "HEXA_STRIPE_SHOP_TOKEN", "HEXA_STRIPE_"),
-    environment: raw.environment === "live" ? "live" : "sandbox",
-    allow_write_tools: raw.allow_write_tools === true,
-    // Write operations always require an explicit human confirmation.
-    require_approval: true,
-  };
-}
-
-export function stripeToolAccess(toolName: string, config: PluginConfig) {
-  if (STRIPE_READ_TOOLS.has(toolName)) return { allowed: true, write: false, approval: false };
-  if (STRIPE_WRITE_TOOLS.has(toolName)) {
-    const allowed = config.allow_write_tools === true;
-    return { allowed, write: true, approval: true };
-  }
-  return { allowed: false, write: false, approval: false };
+  return sanitizeStripeConfig(input);
 }

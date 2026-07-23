@@ -1,0 +1,3 @@
+[submodule "vendor/hexa-crm-plugins"]
+	path = vendor/hexa-crm-plugins
+	url = git@github.com:HEXA-NIX/hexa-crm-plugins.git

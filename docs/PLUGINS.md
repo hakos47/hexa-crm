@@ -55,14 +55,22 @@ Tras añadir o rotar una referencia a secreto, es necesario reiniciar el servici
 
 ## 5. Plugins Integrados y Estrategia de Transición
 
-Actualmente, el sistema cuenta con dos plugins principales originados en el catálogo local (`src/lib/plugins/`):
+Actualmente, el sistema cuenta con dos plugins principales:
 
-- **Base de datos externa (`database_bridge`)**: Conexión PostgreSQL independiente por tenant. Modo recomendado inicial: `read_only`.
-- **Stripe MCP (`stripe_mcp`)**: Integración con las herramientas de Stripe MCP (`https://mcp.stripe.com`). Requiere confirmación humana explícita para operaciones de escritura.
+- **Base de datos externa (`database_bridge`)**: Conexión PostgreSQL independiente por tenant. Se mantiene in-tree (`src/lib/plugins/`). Modo recomendado inicial: `read_only`.
+- **Stripe MCP (`stripe_mcp`)**: Integración con las herramientas de Stripe MCP (`https://mcp.stripe.com`). Extraído e integrado como submódulo externo mediante `vendor/hexa-crm-plugins` -> `plugins/stripe`, ambos pinneados por SHA de commit inmutable. Requiere confirmación humana explícita para operaciones de escritura.
+
+### Inicialización y Actualización de Submódulos
+
+Al clonar el repositorio o actualizar las dependencias de plugins externos, ejecute:
+
+```bash
+git submodule update --init --recursive
+```
 
 ### Plan de Transición de Plugins Locales
 > [!NOTE]
-> La extracción de los plugins locales `database_bridge` y `stripe_mcp` hacia repositorios independientes está en **fase de planificación y transición activa**. Los plugins in-tree se mantendrán hasta la completa validación e inclusión de sus submódulos en el agregador `hexa-crm-plugins.git`.
+> El plugin `stripe_mcp` ya ha sido extraído al agregador externo en `vendor/hexa-crm-plugins/plugins/stripe` fijado por SHA. La extracción de `database_bridge` hacia su propio repositorio independiente permanece in-tree hasta su posterior fase de migración.
 
 ---
 
