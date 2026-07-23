@@ -326,6 +326,15 @@ export type WorkProject = {
   updated_at: string;
 };
 
+export type WorkProjectInput = {
+  id?: number | null;
+  name: string;
+  description?: string;
+  status?: "planned" | "active" | "paused" | "done" | "archived";
+  start_date?: string | null;
+  target_date?: string | null;
+};
+
 export type WorkItem = {
   id: number;
   company_id: number;
@@ -363,6 +372,13 @@ export type WorkItemFilters = {
   type?: WorkItemType;
   priority?: WorkPriority;
   category_id?: number | null;
+  /**
+   * Filter by project ID (tri-state semantics):
+   * - undefined: all tasks regardless of project
+   * - number: tasks belonging to specific project ID
+   * - null: tasks without project (unassigned)
+   */
+  project_id?: number | null;
   assignee_id?: number | null;
 };
 
@@ -375,6 +391,7 @@ export type WorkItemInput = {
   priority?: WorkPriority;
   category_id?: number | null;
   category_name?: string;
+  /** ID del proyecto al que pertenece la tarea, o null/undefined si no pertenece a ninguno */
   project_id?: number | null;
   assignee_id?: number | null;
   start_date?: string | null;

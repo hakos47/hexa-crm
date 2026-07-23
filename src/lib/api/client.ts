@@ -30,6 +30,8 @@ import type {
   WorkItemFilters,
   WorkItemInput,
   WorkMember,
+  WorkProject,
+  WorkProjectInput,
 } from "../types";
 import { browserApi } from "./browser-store";
 import { getToken, clearSession } from "../stores/session";
@@ -122,6 +124,10 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "list_work_items": return browserApi.listWorkItems(args.filters, token) as Promise<T>;
     case "upsert_work_item": return browserApi.upsertWorkItem(args.input, token) as Promise<T>;
     case "archive_work_item": return browserApi.archiveWorkItem(args.id, token) as Promise<T>;
+    case "list_work_projects": return browserApi.listWorkProjects(args.status_filter, token) as Promise<T>;
+    case "get_work_project": return browserApi.getWorkProject(args.id, token) as Promise<T>;
+    case "upsert_work_project": return browserApi.upsertWorkProject(args.input, token) as Promise<T>;
+    case "archive_work_project": return browserApi.archiveWorkProject(args.id, token) as Promise<T>;
     case "list_work_categories": return browserApi.listWorkCategories(token) as Promise<T>;
     case "upsert_work_category": return browserApi.upsertWorkCategory(args.input, token) as Promise<T>;
     case "rename_work_category": return browserApi.renameWorkCategory(args.id, args.name, token) as Promise<T>;
@@ -288,6 +294,24 @@ export const api = {
     confirmed,
   }),
   supportsWorkManagement,
+  listWorkProjects: (statusFilter?: string) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject[]>("list_work_projects", { status_filter: statusFilter }),
+  getWorkProject: (id: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("get_work_project", { id }),
+  upsertWorkProject: (input: WorkProjectInput) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("upsert_work_project", { input }),
+  archiveWorkProject: (id: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("archive_work_project", { id }),
+
+  list_work_projects: (statusFilter?: string) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject[]>("list_work_projects", { status_filter: statusFilter }),
+  get_work_project: (id: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("get_work_project", { id }),
+  upsert_work_project: (input: WorkProjectInput) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("upsert_work_project", { input }),
+  archive_work_project: (id: number) =>
+    remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkProject>("archive_work_project", { id }),
+
   listWorkItems: (filters?: WorkItemFilters) =>
     remoteOperatorConfig ? remoteWriteUnavailable() : call<WorkItem[]>("list_work_items", { filters }),
   upsertWorkItem: (input: WorkItemInput) =>

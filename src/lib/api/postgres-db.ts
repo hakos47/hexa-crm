@@ -48,6 +48,7 @@ import type {
   WorkItemInput,
   WorkMember,
   WorkProject,
+  WorkProjectInput,
 } from "../types";
 import {
   billingByCompany,
@@ -722,6 +723,29 @@ async function requireAdminCategoryManagementPg(token: string | null): Promise<A
     throw new Error("Solo los administradores pueden gestionar categorías.");
   }
   return u;
+}
+
+async function requireAdminProjectManagementPg(token: string | null): Promise<AuthUser> {
+  const u = await requireSession(token);
+  if (u.role !== "admin" && !u.is_master) {
+    throw new Error("Solo los administradores pueden gestionar proyectos.");
+  }
+  return u;
+}
+
+function formatWorkProject(r: any): WorkProject {
+  return {
+    id: r.id,
+    company_id: r.company_id,
+    name: r.name,
+    description: r.description ?? "",
+    status: r.status,
+    start_date: toIso(r.start_date) || null,
+    target_date: toIso(r.target_date) || null,
+    created_by: r.created_by,
+    created_at: toIso(r.created_at),
+    updated_at: toIso(r.updated_at),
+  };
 }
 
 function formatWorkItem(r: any): WorkItem {
@@ -2141,6 +2165,115 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
      Módulo Trabajo (Multiempresa) PostgreSQL Implementation
      ------------------------------------------------------------- */
 
+  async listWorkProjects(status_filter?: string, token?: string | null): Promise<WorkProject[]> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    let query = sql`
+      SELECT * FROM work_projects
+      WHERE company_id = ${companyId}
+    `;
+    if (status_filter && status_filter.trim() !== "" && status_filter !== "all") {
+      query = sql`${query} AND status = ${status_filter.trim()}`;
+    }
+    query = sql`${query} ORDER BY created_at DESC, id DESC`;
+    const rows = await query;
+    return rows.map(formatWorkProject);
+  },
+
+  async getWorkProject(id: number, token?: string | null): Promise<WorkProject> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const rows = await sql`
+      SELECT * FROM work_projects
+      WHERE id = ${id} AND company_id = ${companyId}
+    `;
+    if (rows.length === 0) throw new Error("Proyecto no encontrado.");
+    return formatWorkProject(rows[0]);
+  },
+
+  async upsertWorkProject(input: WorkProjectInput, token?: string | null): Promise<WorkProject> {
+    const user = await requireAdminProjectManagementPg(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const name = (input.name ?? "").trim();
+    if (!name) throw new Error("El nombre del proyecto es obligatorio.");
+
+    let existing: any = null;
+    if (input.id != null) {
+      const existingRows = await sql`
+        SELECT * FROM work_projects
+        WHERE id = ${input.id} AND company_id = ${companyId}
+      `;
+      if (existingRows.length === 0) throw new Error("Proyecto no encontrado.");
+      existing = existingRows[0];
+    }
+
+    const startDate = input.start_date !== undefined ? (input.start_date ?? null) : (existing?.start_date ? toIso(existing.start_date) : null);
+    const targetDate = input.target_date !== undefined ? (input.target_date ?? null) : (existing?.target_date ? toIso(existing.target_date) : null);
+
+    if (startDate && targetDate) {
+      const startMs = new Date(startDate).getTime();
+      const targetMs = new Date(targetDate).getTime();
+      if (targetMs < startMs) {
+        throw new Error("La fecha de fin no puede ser anterior a la fecha de inicio.");
+      }
+    }
+
+    const status = input.status ?? existing?.status ?? "planned";
+    const description = input.description !== undefined ? (input.description ?? "") : (existing?.description ?? "");
+
+    let projectId: number;
+    if (existing) {
+      const updated = await sql`
+        UPDATE work_projects SET
+          name = ${name},
+          description = ${description},
+          status = ${status},
+          start_date = ${startDate},
+          target_date = ${targetDate},
+          updated_at = NOW()
+        WHERE id = ${existing.id} AND company_id = ${companyId}
+        RETURNING id
+      `;
+      projectId = updated[0].id;
+    } else {
+      const inserted = await sql`
+        INSERT INTO work_projects (
+          company_id, name, description, status, start_date, target_date, created_by
+        ) VALUES (
+          ${companyId}, ${name}, ${description}, ${status}, ${startDate}, ${targetDate}, ${user.id}
+        )
+        RETURNING id
+      `;
+      projectId = inserted[0].id;
+    }
+
+    const fetched = await sql`
+      SELECT * FROM work_projects WHERE id = ${projectId} AND company_id = ${companyId}
+    `;
+    return formatWorkProject(fetched[0]);
+  },
+
+  async archiveWorkProject(id: number, token?: string | null): Promise<WorkProject> {
+    const user = await requireAdminProjectManagementPg(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const res = await sql`
+      UPDATE work_projects
+      SET status = 'archived', updated_at = NOW()
+      WHERE id = ${id} AND company_id = ${companyId}
+      RETURNING id
+    `;
+    if (res.length === 0) throw new Error("Proyecto no encontrado.");
+
+    const fetched = await sql`
+      SELECT * FROM work_projects WHERE id = ${id} AND company_id = ${companyId}
+    `;
+    return formatWorkProject(fetched[0]);
+  },
+
   async listWorkItems(filters?: WorkItemFilters, token?: string | null): Promise<WorkItem[]> {
     const user = await requireSession(token ?? null);
     const companyId = await resolveActiveCompanyId(token ?? null, user.id);
@@ -2170,6 +2303,13 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
           query = sql`${query} AND wi.category_id IS NULL`;
         } else {
           query = sql`${query} AND wi.category_id = ${filters.category_id}`;
+        }
+      }
+      if (filters.project_id !== undefined) {
+        if (filters.project_id === null) {
+          query = sql`${query} AND wi.project_id IS NULL`;
+        } else if (typeof filters.project_id === "number") {
+          query = sql`${query} AND wi.project_id = ${filters.project_id}`;
         }
       }
       if (filters.assignee_id !== undefined) {
@@ -2232,8 +2372,9 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
     }
 
     if (input.project_id != null) {
-      const projCheck = await sql`SELECT id FROM work_projects WHERE id = ${input.project_id} AND company_id = ${companyId}`;
+      const projCheck = await sql`SELECT id, status FROM work_projects WHERE id = ${input.project_id} AND company_id = ${companyId}`;
       if (projCheck.length === 0) throw new Error("El proyecto no pertenece a esta empresa.");
+      if (projCheck[0].status === "archived") throw new Error("No se pueden crear ni asignar tareas a un proyecto archivado.");
     }
 
     let existing: any = null;
@@ -2612,6 +2753,10 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
     };
   },
 
+  list_work_projects(status_filter?: string, token?: string | null) { return this.listWorkProjects(status_filter, token); },
+  get_work_project(id: number, token?: string | null) { return this.getWorkProject(id, token); },
+  upsert_work_project(input: WorkProjectInput, token?: string | null) { return this.upsertWorkProject(input, token); },
+  archive_work_project(id: number, token?: string | null) { return this.archiveWorkProject(id, token); },
   list_work_categories(token?: string | null) { return this.listWorkCategories(token); },
   upsert_work_category(input: any, token?: string | null) { return this.upsertWorkCategory(input, token); },
   merge_work_categories(sourceId: number, targetId: number, token?: string | null) { return this.mergeWorkCategory(sourceId, targetId, token); },

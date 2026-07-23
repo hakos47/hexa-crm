@@ -198,6 +198,93 @@ describe("Trabajo Backend & API Tests", () => {
     });
   });
 
+  describe("Work Projects CRUD & Tri-State Filtering", () => {
+    it("validates project name and dates", async () => {
+      await expect(
+        browserApi.upsertWorkProject({ name: "   " }, adminToken)
+      ).rejects.toThrow("El nombre del proyecto es obligatorio.");
+
+      await expect(
+        browserApi.upsertWorkProject(
+          {
+            name: "Proyecto Alpha",
+            start_date: "2026-08-10T00:00:00Z",
+            target_date: "2026-08-01T00:00:00Z",
+          },
+          adminToken
+        )
+      ).rejects.toThrow("La fecha de fin no puede ser anterior a la fecha de inicio.");
+    });
+
+    it("restricts project upsert and archive to admin", async () => {
+      await expect(
+        browserApi.upsertWorkProject({ name: "Cajero Project" }, cajeroToken)
+      ).rejects.toThrow("Solo los administradores pueden gestionar proyectos.");
+
+      const proj = await browserApi.upsertWorkProject({ name: "Admin Project" }, adminToken);
+
+      await expect(
+        browserApi.archiveWorkProject(proj.id, cajeroToken)
+      ).rejects.toThrow("Solo los administradores pueden gestionar proyectos.");
+    });
+
+    it("supports CRUD, listing by status and tri-state project_id filtering", async () => {
+      const proj1 = await browserApi.upsertWorkProject(
+        { name: "Project 1", status: "active" },
+        adminToken
+      );
+      const proj2 = await browserApi.upsertWorkProject(
+        { name: "Project 2", status: "planned" },
+        adminToken
+      );
+
+      const activeProjects = await browserApi.listWorkProjects("active", adminToken);
+      expect(activeProjects.some((p) => p.id === proj1.id)).toBe(true);
+      expect(activeProjects.some((p) => p.id === proj2.id)).toBe(false);
+
+      const fetchedProj1 = await browserApi.getWorkProject(proj1.id, adminToken);
+      expect(fetchedProj1.name).toBe("Project 1");
+
+      const itemP1 = await browserApi.upsertWorkItem(
+        { title: "Task for Project 1", project_id: proj1.id },
+        adminToken
+      );
+      const itemUnassigned = await browserApi.upsertWorkItem(
+        { title: "Unassigned Task", project_id: null },
+        adminToken
+      );
+
+      // Tri-state filter testing:
+      // 1. undefined: all tasks
+      const allItems = await browserApi.listWorkItems({}, adminToken);
+      expect(allItems.some((i) => i.id === itemP1.id)).toBe(true);
+      expect(allItems.some((i) => i.id === itemUnassigned.id)).toBe(true);
+
+      // 2. number: specific project tasks
+      const p1Items = await browserApi.listWorkItems({ project_id: proj1.id }, adminToken);
+      expect(p1Items.every((i) => i.project_id === proj1.id)).toBe(true);
+      expect(p1Items.some((i) => i.id === itemP1.id)).toBe(true);
+      expect(p1Items.some((i) => i.id === itemUnassigned.id)).toBe(false);
+
+      // 3. null: tasks without project
+      const unassignedItems = await browserApi.listWorkItems({ project_id: null }, adminToken);
+      expect(unassignedItems.every((i) => i.project_id === null)).toBe(true);
+      expect(unassignedItems.some((i) => i.id === itemUnassigned.id)).toBe(true);
+      expect(unassignedItems.some((i) => i.id === itemP1.id)).toBe(false);
+
+      // Archive project and prevent assigning new tasks
+      const archivedProj = await browserApi.archiveWorkProject(proj1.id, adminToken);
+      expect(archivedProj.status).toBe("archived");
+
+      await expect(
+        browserApi.upsertWorkItem(
+          { title: "Task in archived project", project_id: proj1.id },
+          adminToken
+        )
+      ).rejects.toThrow("No se pueden crear ni asignar tareas a un proyecto archivado.");
+    });
+  });
+
   describe("Backups & Store Migration", () => {
     it("includes work arrays in export_backup and restores them cleanly", async () => {
       await browserApi.upsertWorkItem({ title: "Work Item for Backup" }, adminToken);
@@ -212,6 +299,137 @@ describe("Trabajo Backend & API Tests", () => {
       const postRestoreLogin = await browserApi.login("admin", "1234");
       const restoredItems = await browserApi.listWorkItems({}, postRestoreLogin.token);
       expect(restoredItems.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Work Project CRUD & Tri-state Filtering", () => {
+    it("upsertWorkProject requires admin session", async () => {
+      await expect(
+        browserApi.upsertWorkProject({ name: "Proyecto Cajero" }, cajeroToken)
+      ).rejects.toThrow("Solo los administradores pueden gestionar proyectos.");
+    });
+
+    it("upsertWorkProject validates non-empty trimmed name", async () => {
+      await expect(
+        browserApi.upsertWorkProject({ name: "   " }, adminToken)
+      ).rejects.toThrow("El nombre del proyecto es obligatorio.");
+    });
+
+    it("upsertWorkProject validates start_date and target_date logic", async () => {
+      await expect(
+        browserApi.upsertWorkProject(
+          {
+            name: "Proyecto Fechas Inválidas",
+            start_date: "2026-05-10",
+            target_date: "2026-05-01",
+          },
+          adminToken
+        )
+      ).rejects.toThrow("La fecha de fin no puede ser anterior a la fecha de inicio.");
+    });
+
+    it("supports project lifecycle: create, get, list with status filter, update, archive", async () => {
+      const proj = await browserApi.upsertWorkProject(
+        {
+          name: "  Proyecto Rediseño  ",
+          description: "Nueva interfaz de usuario",
+          status: "planned",
+          start_date: "2026-06-01",
+          target_date: "2026-06-30",
+        },
+        adminToken
+      );
+
+      expect(proj.name).toBe("Proyecto Rediseño");
+      expect(proj.status).toBe("planned");
+
+      const fetched = await browserApi.getWorkProject(proj.id, adminToken);
+      expect(fetched.name).toBe("Proyecto Rediseño");
+
+      const plannedList = await browserApi.listWorkProjects("planned", adminToken);
+      expect(plannedList.some((p) => p.id === proj.id)).toBe(true);
+
+      const activeList = await browserApi.listWorkProjects("active", adminToken);
+      expect(activeList.some((p) => p.id === proj.id)).toBe(false);
+
+      const updated = await browserApi.upsertWorkProject(
+        {
+          id: proj.id,
+          name: "Proyecto Rediseño V2",
+          status: "active",
+        },
+        adminToken
+      );
+      expect(updated.name).toBe("Proyecto Rediseño V2");
+      expect(updated.status).toBe("active");
+
+      const archived = await browserApi.archiveWorkProject(proj.id, adminToken);
+      expect(archived.status).toBe("archived");
+    });
+
+    it("prevents creating new tasks in an archived project", async () => {
+      const proj = await browserApi.upsertWorkProject(
+        { name: "Proyecto Archivable" },
+        adminToken
+      );
+      await browserApi.archiveWorkProject(proj.id, adminToken);
+
+      await expect(
+        browserApi.upsertWorkItem(
+          { title: "Nueva Tarea en Proyecto Archivado", project_id: proj.id },
+          adminToken
+        )
+      ).rejects.toThrow("No se pueden crear ni asignar tareas a un proyecto archivado.");
+    });
+
+    it("validates project_id belongs to active company", async () => {
+      await expect(
+        browserApi.upsertWorkItem(
+          { title: "Tarea con proyecto inexistente", project_id: 999999 },
+          adminToken
+        )
+      ).rejects.toThrow("El proyecto no pertenece a esta empresa.");
+    });
+
+    it("supports tri-state project_id filter in listWorkItems", async () => {
+      const proj = await browserApi.upsertWorkProject(
+        { name: "Proyecto Alpha" },
+        adminToken
+      );
+
+      const taskInProject = await browserApi.upsertWorkItem(
+        { title: "Tarea Alpha 1", project_id: proj.id },
+        adminToken
+      );
+
+      const taskWithoutProject = await browserApi.upsertWorkItem(
+        { title: "Tarea Suelta" },
+        adminToken
+      );
+
+      // undefined: returns all items
+      const allItems = await browserApi.listWorkItems(
+        { project_id: undefined },
+        adminToken
+      );
+      expect(allItems.some((i) => i.id === taskInProject.id)).toBe(true);
+      expect(allItems.some((i) => i.id === taskWithoutProject.id)).toBe(true);
+
+      // number: returns only items in specific project
+      const projectItems = await browserApi.listWorkItems(
+        { project_id: proj.id },
+        adminToken
+      );
+      expect(projectItems.some((i) => i.id === taskInProject.id)).toBe(true);
+      expect(projectItems.some((i) => i.id === taskWithoutProject.id)).toBe(false);
+
+      // null: returns only items without project
+      const unassignedItems = await browserApi.listWorkItems(
+        { project_id: null },
+        adminToken
+      );
+      expect(unassignedItems.some((i) => i.id === taskInProject.id)).toBe(false);
+      expect(unassignedItems.some((i) => i.id === taskWithoutProject.id)).toBe(true);
     });
   });
 });

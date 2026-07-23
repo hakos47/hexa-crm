@@ -14,6 +14,7 @@
     WorkMember,
     WorkPriority,
     WorkStatus,
+    WorkProject,
   } from "$lib/types";
   import Button from "$lib/components/Button.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -25,11 +26,13 @@
   let items = $state<WorkItem[]>([]);
   let categories = $state<WorkCategory[]>([]);
   let members = $state<WorkMember[]>([]);
+  let projects = $state<WorkProject[]>([]);
   let loading = $state(true);
 
   // Quick Capture State
   let quickTitle = $state("");
   let quickCategoryName = $state("");
+  let quickProjectId = $state("");
   let quickSaving = $state(false);
 
   // Filters State
@@ -38,6 +41,7 @@
   let filterType = $state<string>("");
   let filterPriority = $state<string>("");
   let filterAssignee = $state<string>("");
+  let filterProject = $state<string>("");
 
   // Detail Modal / Drawer State
   let detailModalOpen = $state(false);
@@ -49,6 +53,7 @@
     status: "inbox" as WorkStatus,
     priority: "normal" as WorkPriority,
     category_id: "",
+    project_id: "",
     assignee_id: "",
     start_date: "",
     due_date: "",
@@ -62,6 +67,9 @@
   let mergeModalOpen = $state(false);
   let mergeSourceCategory = $state<WorkCategory | null>(null);
   let mergeTargetCategoryId = $state("");
+
+  // Track active company switch
+  let lastCompanyId = $state<number | null>(null);
 
   // Options for selects
   const statusOptions = [
@@ -128,17 +136,35 @@
     ...categories.map((c) => ({ value: String(c.id), label: c.name })),
   ]);
 
+  const projectFilterOptions = $derived([
+    { value: "", label: "Todos los proyectos" },
+    { value: "none", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
+
+  const quickProjectOptions = $derived([
+    { value: "", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
+
+  const detailProjectOptions = $derived([
+    { value: "", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
+
   async function loadData() {
     loading = true;
     try {
-      const [cats, mems, workList] = await Promise.all([
+      const [cats, mems, workList, projList] = await Promise.all([
         api.listWorkCategories(),
         api.listWorkMembers(),
         api.listWorkItems(),
+        api.listWorkProjects(),
       ]);
       categories = cats;
       members = mems;
       items = workList;
+      projects = projList;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Error al cargar datos de Trabajo", "err");
     } finally {
@@ -150,9 +176,14 @@
     loadData();
   });
 
-  // Watch URL params for ?item=<id> or ?nuevo=1
+  // Watch URL params for ?project=<id>, ?item=<id> or ?nuevo=1
   $effect(() => {
     const url = $page.url;
+    const projectParam = url.searchParams.get("project");
+    if (projectParam !== null && projectParam !== filterProject) {
+      filterProject = projectParam;
+    }
+
     const nuevoParam = url.searchParams.get("nuevo");
     const itemParam = url.searchParams.get("item");
 
@@ -167,6 +198,32 @@
     }
   });
 
+  // Handle active company switch safety: reset project filter when active company changes
+  $effect(() => {
+    const currentCid = $session.activeCompanyId;
+    if (lastCompanyId !== null && lastCompanyId !== currentCid) {
+      filterProject = "";
+      if ($page.url.searchParams.has("project")) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("project");
+        goto(url.pathname + url.search, { replaceState: true });
+      }
+      loadData();
+    }
+    lastCompanyId = currentCid;
+  });
+
+  function handleProjectFilterChange(val: string) {
+    filterProject = val;
+    const url = new URL(window.location.href);
+    if (val) {
+      url.searchParams.set("project", val);
+    } else {
+      url.searchParams.delete("project");
+    }
+    goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
+  }
+
   async function saveQuickTask() {
     if (!quickTitle.trim()) {
       showToast("Escribe un título para la tarea", "err");
@@ -180,11 +237,12 @@
         type: "task",
         status: "inbox",
         priority: "normal",
-        project_id: null,
+        project_id: quickProjectId ? Number(quickProjectId) : null,
         assignee_id: null,
       });
       quickTitle = "";
       quickCategoryName = "";
+      quickProjectId = "";
       showToast("Tarea guardada correctamente");
       await loadData();
     } catch (err) {
@@ -203,6 +261,7 @@
       status: "inbox",
       priority: "normal",
       category_id: "",
+      project_id: filterProject && filterProject !== "none" ? filterProject : "",
       assignee_id: "",
       start_date: "",
       due_date: "",
@@ -219,6 +278,7 @@
       status: item.status,
       priority: item.priority,
       category_id: item.category_id ? String(item.category_id) : "",
+      project_id: item.project_id ? String(item.project_id) : "",
       assignee_id: item.assignee_id ? String(item.assignee_id) : "",
       start_date: item.start_date ? item.start_date.slice(0, 10) : "",
       due_date: item.due_date ? item.due_date.slice(0, 10) : "",
@@ -230,7 +290,10 @@
     detailModalOpen = false;
     editingItem = null;
     if ($page.url.searchParams.has("item") || $page.url.searchParams.has("nuevo")) {
-      goto("/trabajo", { replaceState: true });
+      const url = new URL(window.location.href);
+      url.searchParams.delete("item");
+      url.searchParams.delete("nuevo");
+      goto(url.pathname + url.search, { replaceState: true });
     }
   }
 
@@ -248,6 +311,7 @@
         status: detailForm.status,
         priority: detailForm.priority,
         category_id: detailForm.category_id ? Number(detailForm.category_id) : null,
+        project_id: detailForm.project_id ? Number(detailForm.project_id) : null,
         assignee_id: detailForm.assignee_id ? Number(detailForm.assignee_id) : null,
         start_date: detailForm.start_date || null,
         due_date: detailForm.due_date || null,
@@ -372,6 +436,13 @@
       if (filterType && item.type !== filterType) return false;
       if (filterPriority && item.priority !== filterPriority) return false;
       if (filterAssignee && String(item.assignee_id || "") !== filterAssignee) return false;
+      if (filterProject) {
+        if (filterProject === "none") {
+          if (item.project_id !== null) return false;
+        } else {
+          if (String(item.project_id || "") !== filterProject) return false;
+        }
+      }
       return true;
     })
   );
@@ -395,6 +466,12 @@
 
     return groups;
   });
+
+  function getProjectName(id?: number | null) {
+    if (!id) return null;
+    const p = projects.find((proj) => proj.id === id);
+    return p ? p.name : null;
+  }
 
   function typeLabel(t: string) {
     switch (t) {
@@ -476,12 +553,12 @@
 </script>
 
 <section class="trabajo-page workspace-page">
-  <!-- Intro Header (Obsidian + radiant purple design system) -->
+  <!-- Intro Header -->
   <div class="workspace-intro workspace-intro-compact mb-6">
     <p class="workspace-index">02 / TRABAJO MULTIEMPRESA</p>
     <div class="workspace-intro-row">
       <h2>Bandeja de trabajo,<br /><em>organizada.</em></h2>
-      <p>Gestión centralizada de tareas, incidencias e hitos clasificados por categoría.</p>
+      <p>Gestión centralizada de tareas, incidencias e hitos clasificados por categoría y proyecto.</p>
     </div>
   </div>
 
@@ -498,9 +575,9 @@
         type="text"
         bind:value={quickTitle}
         placeholder="Escribe el título de la tarea..."
-        class="field flex-1 min-w-[16rem] text-sm"
+        class="field flex-1 min-w-[14rem] text-sm"
       />
-      <div class="relative w-full sm:w-56">
+      <div class="relative w-full sm:w-44">
         <input
           type="text"
           bind:value={quickCategoryName}
@@ -514,6 +591,12 @@
           {/each}
         </datalist>
       </div>
+      <Select
+        options={quickProjectOptions}
+        bind:value={quickProjectId}
+        placeholder="Sin proyecto"
+        class="w-full sm:w-44"
+      />
       <Button variant="primary" type="submit" disabled={quickSaving} class="shrink-0">
         + Guardar tarea
       </Button>
@@ -527,6 +610,13 @@
       bind:value={filterText}
       placeholder="Buscar tarea por título o descripción…"
       class="field w-full max-w-xs text-sm"
+    />
+    <Select
+      options={projectFilterOptions}
+      value={filterProject}
+      onvaluechange={handleProjectFilterChange}
+      placeholder="Todos los proyectos"
+      class="w-48"
     />
     <Select
       options={statusOptions}
@@ -634,6 +724,14 @@
                     </div>
 
                     <div class="flex flex-wrap items-center gap-2 shrink-0">
+                      {#if item.project_id}
+                        {@const projName = getProjectName(item.project_id)}
+                        {#if projName}
+                          <span class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-400/20 px-2 py-0.5 text-xs font-medium text-[var(--color-purple-bright)]">
+                            ◫ {projName}
+                          </span>
+                        {/if}
+                      {/if}
                       <Badge tone={statusBadgeTone(item.status)}>{statusLabel(item.status)}</Badge>
                       <Badge tone="neutral">{typeLabel(item.type)}</Badge>
                       <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
@@ -725,10 +823,27 @@
 
     <div class="grid gap-3 sm:grid-cols-2">
       <Select
+        label="Proyecto"
+        options={detailProjectOptions}
+        bind:value={detailForm.project_id}
+      />
+      <Select
         label="Responsable"
         options={detailAssigneeOptions}
         bind:value={detailForm.assignee_id}
       />
+    </div>
+
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="space-y-1">
+        <label for="task-start-date" class="text-xs font-medium text-[var(--color-muted)]">Fecha de inicio</label>
+        <input
+          id="task-start-date"
+          type="date"
+          bind:value={detailForm.start_date}
+          class="field w-full text-sm"
+        />
+      </div>
       <div class="space-y-1">
         <label for="task-due-date" class="text-xs font-medium text-[var(--color-muted)]">Fecha límite</label>
         <input
