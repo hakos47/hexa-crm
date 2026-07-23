@@ -38,6 +38,7 @@
   let filterType = $state<string>("");
   let filterPriority = $state<string>("");
   let filterAssignee = $state<string>("");
+  let viewMode = $state<"list" | "kanban">("list");
 
   // Detail Modal / Drawer State
   let detailModalOpen = $state(false);
@@ -127,6 +128,28 @@
     { value: "", label: "Sin categoría" },
     ...categories.map((c) => ({ value: String(c.id), label: c.name })),
   ]);
+
+  const kanbanColumns: { status: WorkStatus; label: string; tone: "neutral" | "ok" | "warn" | "danger" | "ai" }[] = [
+    { status: "inbox", label: "Inbox", tone: "neutral" },
+    { status: "planned", label: "Planificado", tone: "warn" },
+    { status: "in_progress", label: "En progreso", tone: "ai" },
+    { status: "blocked", label: "Bloqueado", tone: "danger" },
+    { status: "done", label: "Hecho", tone: "ok" },
+  ];
+
+  async function moveTaskStatus(item: WorkItem, newStatus: WorkStatus) {
+    try {
+      await api.upsertWorkItem({
+        id: item.id,
+        title: item.title,
+        status: newStatus,
+      });
+      showToast(`Estado cambiado a ${statusLabel(newStatus)}`);
+      await loadData();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al cambiar estado", "err");
+    }
+  }
 
   async function loadData() {
     loading = true;
@@ -552,6 +575,25 @@
       placeholder="Todos los responsables"
       class="w-48"
     />
+
+    <!-- View Mode Switcher Toggle (Lista / Kanban) -->
+    <div class="flex items-center rounded-xl border border-[var(--color-border-soft)] bg-black/40 p-1">
+      <button
+        type="button"
+        onclick={() => (viewMode = "list")}
+        class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition {viewMode === 'list' ? 'bg-purple-500/20 text-[var(--color-purple-bright)] shadow-sm' : 'text-[var(--color-muted)] hover:text-white'}"
+      >
+        <span class="text-sm">☰</span> Lista
+      </button>
+      <button
+        type="button"
+        onclick={() => (viewMode = "kanban")}
+        class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition {viewMode === 'kanban' ? 'bg-purple-500/20 text-[var(--color-purple-bright)] shadow-sm' : 'text-[var(--color-muted)] hover:text-white'}"
+      >
+        <span class="text-sm">☳</span> Kanban
+      </button>
+    </div>
+
     {#if $isAdmin}
       <Button variant="secondary" onclick={openNewCategoryModal} class="ml-auto text-xs">
         + Nueva categoría
@@ -559,7 +601,7 @@
     {/if}
   </div>
 
-  <!-- Content / Grouped List View -->
+  <!-- Content View (Lista vs Kanban) -->
   {#if loading}
     <div class="py-12 text-center text-sm text-[var(--color-muted-dim)]">
       Cargando bandeja de trabajo...
@@ -571,6 +613,93 @@
     >
       <Button variant="primary" onclick={openNewTaskModal}>+ Nueva tarea</Button>
     </EmptyState>
+  {:else if viewMode === "kanban"}
+    <!-- Kanban Board View -->
+    <div class="grid grid-cols-1 gap-4 overflow-x-auto pb-4 md:grid-cols-5 min-w-[70rem]">
+      {#each kanbanColumns as col}
+        {@const colItems = filteredItems.filter((i) => i.status === col.status)}
+        <div class="flex flex-col rounded-xl border border-[var(--color-border-soft)] bg-black/30 p-3">
+          <!-- Column Header -->
+          <div class="mb-3 flex items-center justify-between border-b border-[var(--color-border-soft)] pb-2.5">
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-sm text-[var(--color-text)]">{col.label}</span>
+              <Badge tone={col.tone}>{colItems.length}</Badge>
+            </div>
+            <button
+              type="button"
+              onclick={() => {
+                editingItem = null;
+                detailForm = {
+                  title: "",
+                  description: "",
+                  type: "task",
+                  status: col.status,
+                  priority: "normal",
+                  category_id: "",
+                  assignee_id: "",
+                  start_date: "",
+                  due_date: "",
+                };
+                detailModalOpen = true;
+              }}
+              class="text-xs text-[var(--color-muted-dim)] hover:text-[var(--color-purple-bright)] font-bold"
+              title="Añadir a esta columna"
+            >
+              +
+            </button>
+          </div>
+
+          <!-- Column Cards -->
+          {#if colItems.length === 0}
+            <div class="flex flex-1 items-center justify-center py-8 text-center text-xs text-[var(--color-muted-dim)] border border-dashed border-[var(--color-border-soft)] rounded-lg">
+              Sin tareas
+            </div>
+          {:else}
+            <div class="space-y-2.5 flex-1">
+              {#each colItems as item (item.id)}
+                <Card
+                  lift={true}
+                  class="cursor-pointer border border-[var(--color-border-soft)] bg-purple-950/20 p-3 transition hover:border-purple-400/40 hover:shadow-md"
+                  onclick={() => openEditTaskModal(item)}
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="font-medium text-xs text-[var(--color-text)] hover:text-[var(--color-purple-bright)] line-clamp-2">
+                      {item.title}
+                    </p>
+                    {#if item.category}
+                      <span
+                        class="h-2 w-2 rounded-full shrink-0"
+                        style="background-color: {item.category.color || '#3b82f6'}"
+                        title={item.category.name}
+                      ></span>
+                    {/if}
+                  </div>
+
+                  {#if item.description}
+                    <p class="mt-1 line-clamp-2 text-[11px] text-[var(--color-muted-dim)]">
+                      {item.description}
+                    </p>
+                  {/if}
+
+                  <div class="mt-2.5 flex flex-wrap items-center justify-between gap-1 border-t border-white/5 pt-2 text-[10px]">
+                    <div class="flex items-center gap-1">
+                      <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
+                      <span class="text-[var(--color-muted-dim)]">{typeLabel(item.type)}</span>
+                    </div>
+
+                    {#if item.assignee_name}
+                      <span class="text-[var(--color-muted)] truncate max-w-[80px]" title={item.assignee_name}>
+                        👤 {item.assignee_name}
+                      </span>
+                    {/if}
+                  </div>
+                </Card>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
   {:else}
     <div class="space-y-6">
       {#each groupedCategories() as group}
