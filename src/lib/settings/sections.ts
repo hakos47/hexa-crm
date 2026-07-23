@@ -2,7 +2,7 @@
  * Ajustes information architecture — categories by user mental model
  * (task / frequency / risk), not by technical stack.
  *
- * Order: personal → business → team → AI → updates → system/danger.
+ * Order: personal → business → team → AI → plugins → updates → system/danger.
  */
 
 export type AjustesSectionId =
@@ -10,6 +10,7 @@ export type AjustesSectionId =
   | "tienda"
   | "equipo"
   | "ia"
+  | "plugins"
   | "actualizaciones"
   | "sistema";
 
@@ -60,6 +61,13 @@ export const AJUSTES_SECTIONS: readonly AjustesSectionDef[] = [
     hint: "URL y modelo del asistente local. Solo administradores.",
     adminOnly: true,
     hasSave: true,
+  },
+  {
+    id: "plugins",
+    label: "Plugins",
+    title: "Integraciones",
+    hint: "Activa y configura capacidades independientes para la tienda seleccionada.",
+    adminOnly: true,
   },
   {
     id: "actualizaciones",

@@ -6,7 +6,7 @@
   import KpiCard from "$lib/components/KpiCard.svelte";
   import Card from "$lib/components/Card.svelte";
   import Badge from "$lib/components/Badge.svelte";
-  import { openAiChat, showToast } from "$lib/stores/ui";
+  import { showToast } from "$lib/stores/ui";
   import { estimateDaysOfCover, qtySoldForProduct } from "$lib/inventory/stock-cover";
   import { countsInBusinessTotals } from "$lib/sales/cancel-sale";
   import { isOnboardingDone } from "$lib/onboarding/state";
@@ -22,6 +22,8 @@
   let settings = $state<Settings | null>(null);
   let centralSynchronizedAt = $state<string | null>(null);
 
+  let alertTasks = $state<Record<string, number>>({});
+
   onMount(async () => {
     try {
       onboardingPending = !isOnboardingDone();
@@ -31,6 +33,22 @@
         api.getSettings(),
       ]);
       centralSynchronizedAt = $session.remote ? new Date().toISOString() : null;
+
+      if (api.supportsWorkManagement()) {
+        try {
+          const workItems = await api.listWorkItems();
+          const taskMap: Record<string, number> = {};
+          for (const item of workItems) {
+            if (item.source_type === "dashboard_alert" && item.source_key && item.status !== "archived") {
+              taskMap[item.source_key] = item.id;
+            }
+          }
+          alertTasks = taskMap;
+        } catch {
+          /* ignore */
+        }
+      }
+
       // Build sold map for low-stock cover hints (last 14d, cap fetches)
       const cutoff = Date.now() - 14 * 86400000;
       const recentSales = sales
@@ -68,6 +86,21 @@
     }
   });
 
+  async function handleCreateTask(alert: { id: string; title: string; detail: string; href: string }) {
+    try {
+      const task = await api.captureDashboardAlert({
+        alertId: alert.id,
+        title: alert.title,
+        detail: alert.detail,
+        href: alert.href,
+      });
+      showToast("Tarea creada en Trabajo");
+      alertTasks = { ...alertTasks, [alert.id]: task.id };
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Error al crear tarea", "err");
+    }
+  }
+
   const recent = $derived(sales.slice(0, 6));
   const showBackupReminder = $derived(needsBackupReminder(settings?.last_backup_at));
   const backupDays = $derived(backupAgeDays(settings?.last_backup_at));
@@ -83,6 +116,14 @@
     {/each}
   </div>
 {:else if stats}
+  <section class="pulse-page">
+    <div class="workspace-intro">
+      <p class="workspace-index">01 / PULSO DEL NEGOCIO</p>
+      <div class="workspace-intro-row">
+        <h2>Lo que importa,<br /><em>ahora.</em></h2>
+        <p>Una lectura breve de ventas, caja y prioridades para abrir el día con criterio.</p>
+      </div>
+    </div>
   {#if $session.remote}
     <p class="mb-4 rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-100" data-central-status>
       CRM central · tenant {$session.remote.tenantCode} · datos actualizados {centralSynchronizedAt ? new Date(centralSynchronizedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "ahora"}. Sin conexión, las operaciones no se guardan localmente.
@@ -118,8 +159,8 @@
     </Card>
   {/if}
   <!-- Resumen KPIs -->
-  <p class="section-label mb-3">Resumen</p>
-  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  <p class="section-label mb-3">El día en cifras</p>
+  <div class="pulse-metrics grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <KpiCard
       label="Ventas hoy"
       value={formatEUR(stats.sales_today_cents)}
@@ -150,8 +191,8 @@
     />
   </div>
 
-  <div class="mt-4 grid gap-4 lg:grid-cols-3" data-dashboard-health>
-    <Card class="lg:col-span-2" lift={false}>
+  <div class="pulse-story mt-4 grid gap-4 lg:grid-cols-3" data-dashboard-health>
+    <Card class="pulse-trend lg:col-span-2" lift={false}>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="section-label !normal-case !tracking-wide !text-sm">Pulso de hoy</h2>
@@ -169,12 +210,38 @@
         {/each}
       </div>
     </Card>
-    <Card lift={false}>
+    <Card class="pulse-attention" lift={false}>
       <div class="mb-3 flex items-center justify-between"><h2 class="section-label !normal-case !tracking-wide !text-sm">Atención ahora</h2><Badge tone={health.alerts.length ? "warn" : "ok"}>{health.alerts.length || "OK"}</Badge></div>
       {#if health.alerts.length}
         <ul class="space-y-2">
           {#each health.alerts as alert (alert.id)}
-            <li><a href={alert.href} class="block rounded-lg border border-[var(--color-border)] bg-black/20 p-2.5 hover:border-purple-400/35"><p class="text-xs font-medium text-[var(--color-text)]">{alert.title}</p><p class="mt-0.5 text-[11px] text-[var(--color-muted-dim)]">{alert.detail} →</p></a></li>
+            {@const taskId = alertTasks[alert.id]}
+            <li class="rounded-lg border border-[var(--color-border)] bg-black/20 p-2.5 transition hover:border-purple-400/35">
+              <div class="flex items-center justify-between gap-2">
+                <a href={alert.href} class="block flex-1 min-w-0">
+                  <p class="text-xs font-medium text-[var(--color-text)]">{alert.title}</p>
+                  <p class="mt-0.5 text-[11px] text-[var(--color-muted-dim)]">{alert.detail} →</p>
+                </a>
+                {#if api.supportsWorkManagement()}
+                  {#if taskId}
+                    <a
+                      href="/trabajo?item={taskId}"
+                      class="shrink-0 rounded px-2 py-1 text-xs font-medium bg-purple-500/20 text-purple-200 hover:bg-purple-500/30 border border-purple-400/20"
+                    >
+                      Ver tarea
+                    </a>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={() => handleCreateTask(alert)}
+                      class="shrink-0 rounded px-2 py-1 text-xs font-medium bg-purple-600/30 text-purple-200 hover:bg-purple-600/50 border border-purple-400/20"
+                    >
+                      Crear tarea
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            </li>
           {/each}
         </ul>
       {:else}
@@ -183,17 +250,17 @@
     </Card>
   </div>
 
-  <Card class="mt-4 border border-purple-400/20 bg-purple-500/5" lift={false} data-dashboard-ai-slot>
+  <Card class="pulse-ai-note mt-4" lift={false} data-dashboard-ai-slot>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 class="section-label !normal-case !tracking-wide !text-sm">Recomendación IA</h2>
         <p class="mt-1 text-sm text-[var(--color-muted)]">Pregunta por el resumen de hoy, stock o prioridades. Si Ollama está apagado, el resto del CRM sigue disponible.</p>
       </div>
-      <button type="button" class="min-h-11 rounded-xl border border-purple-400/30 px-4 text-sm font-medium text-radiant hover:bg-purple-500/10" onclick={openAiChat}>Preguntar al asistente</button>
+      <p class="pulse-ai-hint">El asistente vive en el sello flotante <span>↘</span></p>
     </div>
   </Card>
 
-  <div class="mt-8 grid gap-4 lg:grid-cols-3">
+  <div class="pulse-details mt-8 grid gap-4 lg:grid-cols-3">
     <!-- Stock alerts as pipeline-like cards -->
     <Card class="lg:col-span-1" lift={false}>
       <div class="mb-4 flex items-center justify-between">
@@ -322,4 +389,5 @@
       </p>
     </Card>
   </div>
+  </section>
 {/if}

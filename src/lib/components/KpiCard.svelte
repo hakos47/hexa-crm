@@ -24,7 +24,7 @@
   };
 </script>
 
-<Card class="relative overflow-hidden !p-5">
+<Card class="kpi-card relative overflow-hidden !p-5">
   <!-- soft radiant wash -->
   <div
     class="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-purple-500/10 blur-2xl"
@@ -33,7 +33,7 @@
     <div class="kpi-icon {iconTone[accent]}">{icon}</div>
     <div class="min-w-0 flex-1">
       <p class="section-label !text-[0.65rem] !tracking-[0.16em]">{label}</p>
-      <p class="mt-2 text-3xl font-semibold tabular tracking-tight text-[var(--color-text)]">
+      <p class="kpi-value mt-3 text-3xl font-medium tabular tracking-tight text-[var(--color-text)]">
         {value}
       </p>
       {#if hint}

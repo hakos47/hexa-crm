@@ -3,6 +3,7 @@
   import { sidebarCollapsed } from "$lib/stores/ui";
   import Logo from "$lib/components/Logo.svelte";
   import { PRODUCT_DISPLAY_NAME, PRODUCT_TAGLINE } from "$lib/product";
+  import { api } from "$lib/api/client";
 
   let {
     forceExpanded = false,
@@ -16,24 +17,27 @@
   } = $props();
 
   const collapsed = $derived(forceExpanded ? false : $sidebarCollapsed);
+  const showWork = $derived(api.supportsWorkManagement());
 
-  const links = [
-    { href: "/", label: "Inicio", icon: "◈" },
-    { href: "/inventario", label: "Inventario", icon: "▣" },
-    { href: "/ventas", label: "Ventas", icon: "◎" },
+  const links = $derived([
+    { href: "/", label: "Pulso", icon: "⌁" },
+    ...(showWork ? [{ href: "/trabajo", label: "Trabajo", icon: "☑" }] : []),
+    { href: "/inventario", label: "Inventario", icon: "□" },
+    { href: "/ventas", label: "Ventas", icon: "○" },
     { href: "/caja", label: "Caja", icon: "€" },
-    { href: "/clientes", label: "Clientes", icon: "◉" },
+    { href: "/clientes", label: "Clientes", icon: "◇" },
     { href: "/impuestos", label: "Impuestos", icon: "%" },
     { href: "/ajustes", label: "Ajustes", icon: "⚙" },
-  ];
+  ]);
 
   /** Deep-links that open create flows (?nuevo=1). */
-  const quick = [
+  const quick = $derived([
+    ...(showWork ? [{ href: "/trabajo?nuevo=1", label: "Nueva tarea" }] : []),
     { href: "/ventas?nuevo=1", label: "Nueva venta" },
     { href: "/inventario?nuevo=1", label: "Nuevo producto" },
     { href: "/clientes?nuevo=1", label: "Nuevo cliente" },
     { href: "/caja?nuevo=1", label: "Movimiento de caja" },
-  ];
+  ]);
 
   function active(href: string, path: string) {
     const base = href.split("?")[0];
@@ -52,12 +56,10 @@
 </script>
 
 <aside
-  class="glass-strong flex h-full w-full flex-col border-r border-[var(--color-border)] transition-all duration-300 {collapsed
-    ? 'md:w-[72px]'
-    : 'md:w-64'}"
+  class="crm-sidebar flex h-full w-full flex-col transition-all duration-300 {collapsed ? 'md:w-[76px]' : 'md:w-[17.5rem]'}"
   data-sidebar
 >
-  <div class="flex items-center gap-3 border-b border-[var(--color-border)] px-4 py-4 sm:py-5">
+  <div class="flex items-center gap-3 border-b border-[var(--color-border)] px-5 py-5 sm:py-6">
     <Logo size={40} class="rounded-xl shadow-[0_0_20px_rgba(168,85,247,0.25)]" />
     {#if !collapsed}
       <div class="min-w-0">
@@ -65,7 +67,7 @@
           {PRODUCT_DISPLAY_NAME}
         </p>
         <p class="truncate text-[11px] text-[var(--color-muted-dim)]" title={PRODUCT_TAGLINE}>
-          Asistente de tienda
+          RETAIL OPERATING SYSTEM
         </p>
       </div>
     {/if}
@@ -73,7 +75,7 @@
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if !collapsed}
-      <p class="section-label mb-2 px-2">Navegación</p>
+      <p class="section-label mb-3 px-2">ESPACIOS</p>
     {/if}
     <nav class="space-y-0.5" aria-label="Navegación principal">
       {#each links as link}

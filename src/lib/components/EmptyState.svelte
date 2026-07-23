@@ -13,7 +13,7 @@
 </script>
 
 <div
-  class="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[var(--color-border)] bg-black/20 px-6 py-14 text-center"
+  class="empty-editorial flex flex-col items-center justify-center border border-dashed border-[var(--color-border)] px-6 py-14 text-center"
 >
   <div
     class="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-purple-400/20 bg-purple-500/10 text-xl text-radiant"

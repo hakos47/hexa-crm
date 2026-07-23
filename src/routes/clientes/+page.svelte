@@ -90,7 +90,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap items-center gap-3">
+<section class="customers-page workspace-page">
+<div class="workspace-intro workspace-intro-compact">
+  <p class="workspace-index">05 / CLIENTES</p>
+  <div class="workspace-intro-row">
+    <h2>Personas, no<br /><em>solo tickets.</em></h2>
+    <p>Historial, valor y contexto para cuidar cada relación comercial.</p>
+  </div>
+</div>
+
+<div class="workspace-toolbar mb-5 flex flex-wrap items-center gap-3">
   <input
     bind:value={query}
     placeholder="Buscar nombre, email, teléfono o NIF…"
@@ -108,7 +117,7 @@
 {:else if filtered.length === 0}
   <EmptyState title="Sin resultados" description="Prueba otro término de búsqueda." />
 {:else}
-  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+  <div class="customer-grid grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
     {#each filtered as c}
       {@const metric = metrics[c.id]}
       {@const recentSales = sales.filter((sale) => sale.customer_id === c.id && sale.status !== "cancelled").sort((a, b) => b.sold_at.localeCompare(a.sold_at)).slice(0, 3)}
@@ -146,6 +155,8 @@
     {/each}
   </div>
 {/if}
+
+</section>
 
 <Modal {open} title={editing ? "Editar cliente" : "Nuevo cliente"} onclose={() => (open = false)}>
   <form

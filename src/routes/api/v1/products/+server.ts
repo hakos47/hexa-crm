@@ -23,8 +23,18 @@ export const GET: RequestHandler = async ({ request, url }) => {
   if (!tenant[0]) return failure("unknown_tenant", 403, id);
   const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
   const cursor = Math.max(0, Number(url.searchParams.get("cursor") ?? 0) || 0);
+  const sku = url.searchParams.get("sku")?.trim() || null;
   const products = await sql.begin(async (tx) => {
     await setTenantRls(tx, tenant[0].id);
+    if (sku) {
+      return tx`
+        SELECT id, sku, name, description, category, stock, min_stock, price_cents, vat_rate, currency,
+               condition_code, image_url, evidence, publication_status, updated_at
+        FROM products
+        WHERE company_id = ${tenant[0].id} AND active = TRUE AND publication_status = 'published' AND sku = ${sku}
+        ORDER BY id ASC LIMIT 2
+      `;
+    }
     return tx`
       SELECT id, sku, name, description, category, stock, min_stock, price_cents, vat_rate, currency,
              condition_code, image_url, evidence, publication_status, updated_at

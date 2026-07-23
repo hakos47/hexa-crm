@@ -4,6 +4,9 @@
   import { PRODUCT_DISPLAY_NAME, PRODUCT_TAGLINE } from "$lib/product";
   import Button from "./Button.svelte";
   import Logo from "./Logo.svelte";
+  import { WEB_DATA_MODE } from "$lib/api/client";
+
+  let { onBack }: { onBack?: () => void } = $props();
 
   let username = $state("");
   let password = $state("");
@@ -63,27 +66,27 @@
   }
 </script>
 
-<div class="relative flex min-h-screen items-center justify-center p-4 sm:p-6">
-  <div
-    class="pointer-events-none absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-purple-600/20 blur-[100px]"
-  ></div>
-  <div
-    class="pointer-events-none absolute bottom-1/4 right-1/4 h-72 w-72 rounded-full bg-violet-700/15 blur-[120px]"
-  ></div>
+<div class="login-stage relative flex min-h-screen items-center justify-center p-4 sm:p-6">
+  <img class="login-backdrop" src="/crm-hero-v1.webp" alt="" width="1672" height="941" />
+  <div class="login-stage-scrim"></div>
+  {#if onBack}
+    <button type="button" class="login-back" onclick={onBack}>← Volver a la presentación</button>
+  {/if}
 
   <div
-    class="glass-strong relative z-10 w-full max-w-md rounded-3xl border border-[var(--color-border-strong)] p-6 sm:p-8 glow-purple"
+    class="login-card relative z-10 w-full max-w-md p-6 sm:p-8"
   >
     <div class="mb-6 text-center sm:mb-8">
       <div class="mx-auto mb-4 flex justify-center">
         <Logo size={64} class="rounded-2xl glow-purple" />
       </div>
-      <h1 class="text-xl font-semibold tracking-tight text-[var(--color-text)] sm:text-2xl">
+      <p class="section-label mb-2">ESPACIO DE TRABAJO</p>
+      <h1 class="text-2xl font-medium tracking-tight text-[var(--color-text)] sm:text-3xl">
         {shopName}
       </h1>
       <p class="mt-1 text-sm text-[var(--color-muted)]">{PRODUCT_TAGLINE}</p>
-      <p class="mt-0.5 text-xs text-[var(--color-muted-dim)]">
-        Datos locales · Sin nube obligatoria · {PRODUCT_DISPLAY_NAME}
+      <p class="mt-1 text-xs text-[var(--color-muted-dim)]">
+        {WEB_DATA_MODE === "local" ? "Entorno local · Datos en este navegador" : "Entorno producción · CRM central"}
       </p>
     </div>
 

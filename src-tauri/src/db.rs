@@ -139,6 +139,13 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''",
         [],
     );
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN supplier_name TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN supplier_contact TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN supplier_email TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN supplier_phone TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN fulfillment_mode TEXT NOT NULL DEFAULT 'own_stock'", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN stock_location TEXT NOT NULL DEFAULT 'Almacén principal'", []);
+    let _ = conn.execute("ALTER TABLE products ADD COLUMN condition_code TEXT NOT NULL DEFAULT 'used'", []);
 
     seed_users_if_empty(conn)?;
     Ok(())

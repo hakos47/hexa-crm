@@ -161,6 +161,15 @@
   }
 </script>
 
+<section class="cash-page workspace-page">
+<div class="workspace-intro workspace-intro-compact">
+  <p class="workspace-index">04 / CAJA</p>
+  <div class="workspace-intro-row">
+    <h2>Cada euro,<br /><em>en su lugar.</em></h2>
+    <p>Saldo, arqueo y cierre diario con una lectura clara y verificable.</p>
+  </div>
+</div>
+
 {#if loading}
   <div class="skeleton h-40"></div>
 {:else}
@@ -347,6 +356,8 @@
     </Card>
   {/if}
 {/if}
+
+</section>
 
 <Modal {open} title="Nuevo movimiento de caja" onclose={() => (open = false)}>
   <form

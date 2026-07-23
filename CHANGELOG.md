@@ -10,6 +10,15 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
+
+- Módulo multiempresa Trabajo (fase 1): bandeja persistente y categorizada (`/trabajo`), migración browser store v6, esquema e índices PostgreSQL con RLS por tenant, captura de avisos desde el Dashboard y flag centralizado `supportsWorkManagement()`.
+
+- Gestión de plugins por tenant en Ajustes, con activación y configuración independientes por empresa.
+- Plugin de conexión PostgreSQL externa mediante referencias seguras a variables de entorno.
+- Plugin Stripe MCP para el asistente, con lista cerrada de herramientas, auditoría y confirmación humana obligatoria para escrituras.
+- Perfil Maestro con vista normal de empresas asignadas y despliegue explícito y autorizado de todos los tenants.
+- Selector de proveedores guardados al crear o editar artículos, con alta rápida sin perder el formulario y conservación de proveedores históricos.
+- Landing pública editorial y hero original para presentar el CRM antes del acceso.
 - Shell: accesos rápidos con deep-link `?nuevo=1` (producto, cliente, caja, TPV) (#12).
 - **Onboarding guiado** 1ª sesión: tienda → producto → CTA primera venta; se puede saltar (#11).
 - **Cobertura de stock** (~días a ritmo de 14 d) en inventario y alertas del dashboard (#22).
@@ -30,10 +39,17 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 - El despliegue central ya no inserta datos demo al migrar (#26).
 
 ### Changed
+- Cabecera autenticada adaptada al lenguaje editorial de la landing: contexto de área, selector de empresa custom, identidad de sesión y acciones responsive.
+- Rediseño editorial completo del área autenticada: Pulso, Inventario, TPV e historial, Caja, Clientes, Impuestos y Ajustes comparten la jerarquía y estética de la landing.
+- Onboarding, cambio forzado de contraseña, modales, estados vacíos, toasts y asistente IA se alinean con el mismo sistema visual y responsive.
+- Rediseño integral del shell, navegación, login, tarjetas y sistema visual inspirado en una experiencia retail editorial.
 - **Cerrar sesión** explícito en header y sidebar (sustituye «Bloquear»); toast al salir (#9).
 - Navegación en **español de comercio** (#12).
 - Naming comercial **Hexa** + tagline «Asistente de tienda · IA local opcional» en login/shell (#23). Package npm sigue `hexa-crm`.
 - CI queda orientado a `main`; la protección documentada exige squash, revisión y el check `quality` (#1).
+
+### Fixed
+- El selector de empresa de la cabecera permanece por encima del contenido y permite pulsar todas las opciones del desplegable.
 
 ### Pendiente / backlog
 - Dashboard de mando completo (#13) y copiloto IA con tools (#14)

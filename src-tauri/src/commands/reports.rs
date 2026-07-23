@@ -94,7 +94,7 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, sku, name, description, COALESCE(category,''), stock, min_stock, cost_cents, price_cents, vat_rate, active, created_at, updated_at
+            "SELECT id, sku, name, description, COALESCE(category,''), stock, min_stock, cost_cents, price_cents, vat_rate, COALESCE(supplier_name,''), COALESCE(supplier_contact,''), COALESCE(supplier_email,''), COALESCE(supplier_phone,''), COALESCE(fulfillment_mode,'own_stock'), COALESCE(stock_location,'Almacén principal'), COALESCE(condition_code,'used'), active, created_at, updated_at
              FROM products WHERE active=1 AND stock <= min_stock ORDER BY stock ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -111,9 +111,16 @@ pub fn dashboard_stats(db: State<'_, Db>, token: Option<String>) -> Result<Dashb
                 cost_cents: row.get(7)?,
                 price_cents: row.get(8)?,
                 vat_rate: row.get(9)?,
-                active: row.get::<_, i64>(10)? == 1,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                supplier_name: row.get(10)?,
+                supplier_contact: row.get(11)?,
+                supplier_email: row.get(12)?,
+                supplier_phone: row.get(13)?,
+                fulfillment_mode: row.get(14)?,
+                stock_location: row.get(15)?,
+                condition_code: row.get(16)?,
+                active: row.get::<_, i64>(17)? == 1,
+                created_at: row.get(18)?,
+                updated_at: row.get(19)?,
             })
         })
         .map_err(|e| e.to_string())?

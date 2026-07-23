@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fly, fade } from "svelte/transition";
   import { api } from "$lib/api/client";
-  import type { AiMessage, Product, Sale, DashboardStats, VatSummary } from "$lib/types";
+  import type { AiMessage, PluginKey, Product, Sale, DashboardStats, VatSummary } from "$lib/types";
   import {
     aiPopup,
     closeAiChat,
@@ -17,6 +17,12 @@
   let input = $state("");
   let loading = $state(false);
   let health = $state<{ ok: boolean; models: string[] } | null>(null);
+  let pendingApproval = $state<{
+    plugin_key: PluginKey;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    label: string;
+  } | null>(null);
 
   // Ajustes de voz (TTS)
   let voiceEnabled = $state(false);
@@ -164,6 +170,7 @@
     const content = (text ?? input).trim();
     if (!content || loading) return;
     input = "";
+    pendingApproval = null;
 
     // Cancelar cualquier reproducción de voz previa
     silenceVoice();
@@ -216,6 +223,7 @@
           try {
             const parsed = JSON.parse(trimmed.substring(6));
             const textChunk = parsed.content || "";
+            if (parsed.approval) pendingApproval = parsed.approval;
             
             // Actualizar el texto del asistente en la lista
             messages[messages.length - 1].content += textChunk;
@@ -282,6 +290,33 @@
     }
   }
 
+  async function approvePluginAction() {
+    if (!pendingApproval || loading) return;
+    const approval = pendingApproval;
+    loading = true;
+    try {
+      const response = await api.callPluginTool(
+        approval.plugin_key,
+        approval.tool_name,
+        approval.arguments,
+        true,
+      );
+      const serialized = JSON.stringify(response.result, null, 2).slice(0, 5000);
+      messages = [...messages, {
+        role: "assistant",
+        content: `Operación confirmada y ejecutada en Stripe.\n\n\`\`\`json\n${serialized}\n\`\`\``,
+      }];
+      pendingApproval = null;
+    } catch (error) {
+      messages = [...messages, {
+        role: "assistant",
+        content: error instanceof Error ? `Stripe no ejecutó la operación: ${error.message}` : "Stripe no ejecutó la operación.",
+      }];
+    } finally {
+      loading = false;
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape" && open) {
       if (fullscreen) collapseAiChat();
@@ -340,9 +375,9 @@
     {/if}
 
     <div
-      class="glass-strong relative z-10 {layout.panel} overflow-hidden border border-[var(--color-border-strong)] shadow-2xl glow-purple {fullscreen
-        ? 'rounded-none sm:rounded-2xl'
-        : 'rounded-2xl'}"
+      class="ai-panel-editorial glass-strong relative z-10 {layout.panel} overflow-hidden border border-[var(--color-border-strong)] shadow-2xl {fullscreen
+        ? 'rounded-none sm:rounded-sm'
+        : 'rounded-sm'}"
       transition:fly={{ y: compact ? 24 : 0, duration: 200 }}
       role="dialog"
       aria-label="Asistente IA"
@@ -354,8 +389,8 @@
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <span class="h-2 w-2 shrink-0 rounded-full bg-purple-400 pulse-glow"></span>
-            <h2 class="truncate text-sm font-semibold text-radiant-bright sm:text-base">
-              Asistente IA (Lucía)
+            <h2 class="editorial-serif truncate text-base font-normal text-radiant-bright sm:text-lg">
+              Lucía
             </h2>
           </div>
           <p class="mt-0.5 truncate text-[11px] text-[var(--color-muted-dim)]" title={health?.ok ? health.models.join(", ") : undefined}>
@@ -372,11 +407,12 @@
           <!-- Botón de control de Voz / Silenciar (TTS) -->
           <button
             type="button"
-            class="rounded-lg px-2 py-1 text-xs font-semibold transition border {voiceEnabled ? 'bg-purple-500/20 text-[var(--color-purple-bright)] border-purple-500/30' : 'text-[var(--color-muted)] border-transparent hover:bg-purple-500/10'}"
+            class="rounded-lg px-2 py-1 text-sm font-semibold transition border {voiceEnabled ? 'bg-purple-500/20 text-[var(--color-purple-bright)] border-purple-500/30' : 'text-[var(--color-muted)] border-transparent hover:bg-purple-500/10'}"
             title={voiceEnabled ? "Silenciar asistente de voz" : "Escuchar asistente de voz"}
+            aria-label={voiceEnabled ? "Silenciar asistente de voz" : "Escuchar asistente de voz"}
             onclick={toggleVoice}
           >
-            {voiceEnabled ? "🔊 Voz Activa" : "🔇 Voz Silenciada"}
+            {voiceEnabled ? "🔊" : "🔇"}
           </button>
           
           {#if fullscreen}
@@ -482,6 +518,22 @@
                 <div class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-purple-400 animate-pulse"></span>
                   <span class="text-xs text-[var(--color-muted)]">Estableciendo conexión con Lucía...</span>
+                </div>
+              </div>
+            {/if}
+
+            {#if pendingApproval}
+              <div class="mr-2 rounded-2xl border border-amber-400/25 bg-amber-500/[0.08] p-3 sm:mr-4" data-plugin-approval>
+                <p class="text-sm font-semibold text-amber-100">Confirmación necesaria</p>
+                <p class="mt-1 text-xs text-[var(--color-muted)]">
+                  Stripe ejecutará <code class="text-amber-100">{pendingApproval.tool_name}</code>. Revisa los argumentos antes de continuar.
+                </p>
+                <pre class="mt-2 max-h-32 overflow-auto rounded-lg bg-black/35 p-2 text-[10px] text-amber-50/80">{JSON.stringify(pendingApproval.arguments, null, 2)}</pre>
+                <div class="mt-3 flex justify-end gap-2">
+                  <Button variant="ghost" disabled={loading} onclick={() => pendingApproval = null}>Cancelar</Button>
+                  <Button variant="ai" disabled={loading} onclick={approvePluginAction}>
+                    {loading ? "Ejecutando…" : pendingApproval.label}
+                  </Button>
                 </div>
               </div>
             {/if}

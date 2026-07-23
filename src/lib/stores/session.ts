@@ -96,6 +96,10 @@ export function setActiveCompanyLocal(company: Company) {
   }));
 }
 
+export function setCompaniesLocal(companies: Company[]) {
+  session.update((state) => ({ ...state, companies }));
+}
+
 export function clearSession() {
   session.update((s) => ({
     ...s,

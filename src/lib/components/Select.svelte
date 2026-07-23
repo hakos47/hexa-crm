@@ -15,6 +15,7 @@
     placeholder = "Seleccionar…",
     required = false,
     disabled = false,
+    onvaluechange,
     class: className = "",
   }: {
     label?: string;
@@ -23,6 +24,7 @@
     placeholder?: string;
     required?: boolean;
     disabled?: boolean;
+    onvaluechange?: (value: string) => void;
     class?: string;
   } = $props();
 
@@ -40,6 +42,7 @@
   function pick(opt: SelectOption) {
     if (opt.disabled) return;
     value = opt.value;
+    onvaluechange?.(opt.value);
     open = false;
   }
 

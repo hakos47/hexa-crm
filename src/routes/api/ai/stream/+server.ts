@@ -1,6 +1,30 @@
 import type { RequestHandler } from "@sveltejs/kit";
 import { postgresApi } from "$lib/api/postgres-db";
 import { storeTools } from "$lib/ai/store-tools";
+import { STRIPE_WRITE_TOOLS } from "$lib/plugins/catalog";
+
+function sseEvent(payload: unknown): Response {
+  return new Response(`data: ${JSON.stringify(payload)}\n\n`, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+function toolArguments(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object") return value as Record<string, unknown>;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
 
 export const POST: RequestHandler = async ({ request }) => {
   const authHeader = request.headers.get("Authorization");
@@ -66,7 +90,7 @@ Los resultados de tools son datos reales de la empresa activa: cítalos tal cual
     ];
 
     const url = `${settings.ollama_url.replace(/\/$/, "")}/api/chat`;
-    const ollamaPayload = {
+    const ollamaPayload: Record<string, unknown> = {
       model: settings.ollama_model,
       stream: true,
       think: false,
@@ -76,6 +100,72 @@ Los resultados de tools son datos reales de la empresa activa: cítalos tal cual
         num_predict: 96 // Mantener el límite optimizado para evitar timeouts de Cloudflare
       }
     };
+
+    // Stripe MCP is tenant-scoped. Only tools enabled for the active company
+    // are exposed to Ollama; unknown or disabled operations never reach Stripe.
+    const stripeTools = await postgresApi.list_plugin_tools("stripe_mcp", token).catch(() => []);
+    if (stripeTools.length > 0) {
+      const ollamaTools = stripeTools.map((tool: any) => ({
+        type: "function",
+        function: {
+          name: tool.name,
+          description: `[Stripe] ${tool.description ?? "Herramienta de la cuenta Stripe conectada"}`,
+          parameters: tool.inputSchema ?? { type: "object", properties: {} },
+        },
+      }));
+      const plannerResponse = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...ollamaPayload,
+          stream: false,
+          messages: payloadMsgs,
+          tools: ollamaTools,
+        }),
+      });
+      if (!plannerResponse.ok) {
+        return new Response(JSON.stringify({ error: `Error de Ollama al elegir herramienta: HTTP ${plannerResponse.status}` }), {
+          status: 502,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      const planner = await plannerResponse.json() as any;
+      const calls = Array.isArray(planner?.message?.tool_calls) ? planner.message.tool_calls : [];
+      if (calls.length === 0) {
+        return sseEvent({ content: planner?.message?.content || "No he podido completar la consulta." });
+      }
+
+      for (const call of calls) {
+        const name = String(call?.function?.name ?? "");
+        const args = toolArguments(call?.function?.arguments);
+        if (STRIPE_WRITE_TOOLS.has(name)) {
+          return sseEvent({
+            content: "He preparado una operación en Stripe. Revísala antes de ejecutarla.",
+            approval: {
+              plugin_key: "stripe_mcp",
+              tool_name: name,
+              arguments: args,
+              label: `Confirmar ${name.replaceAll("_", " ")}`,
+            },
+          });
+        }
+      }
+
+      const toolMessages: any[] = [planner.message];
+      for (const call of calls) {
+        const name = String(call?.function?.name ?? "");
+        const result = await postgresApi.call_plugin_tool(
+          "stripe_mcp",
+          name,
+          toolArguments(call?.function?.arguments),
+          false,
+          token,
+        );
+        toolMessages.push({ role: "tool", content: JSON.stringify(result.result) });
+      }
+      ollamaPayload.messages = [...payloadMsgs, ...toolMessages];
+      ollamaPayload.tools = ollamaTools;
+    }
 
     const response = await fetch(url, {
       method: "POST",

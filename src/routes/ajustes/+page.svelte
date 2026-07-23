@@ -9,6 +9,7 @@
   import Badge from "$lib/components/Badge.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import Select from "$lib/components/Select.svelte";
+  import PluginManager from "$lib/components/PluginManager.svelte";
   import { showToast } from "$lib/stores/ui";
   import {
     currentUser,
@@ -357,14 +358,12 @@
 {:else}
   <!-- Page header: calm orientation, not a wall of forms -->
   <header
-    class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+    class="settings-intro workspace-intro workspace-intro-compact mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
     data-ajustes-header
   >
     <div>
-      <p class="section-label mb-1">Configuración</p>
-      <h1 class="text-2xl font-semibold tracking-tight text-[var(--color-text)] sm:text-3xl">
-        Ajustes
-      </h1>
+      <p class="workspace-index">07 / AJUSTES</p>
+      <h1>Tu espacio,<br /><em>a tu manera.</em></h1>
       <p class="mt-1 max-w-lg text-sm text-[var(--color-muted)]">
         Elige una categoría a la izquierda. Solo ves lo que necesitas en cada momento.
       </p>
@@ -649,6 +648,15 @@
             {/if}
           </div>
         </Card>
+      {:else if activeSection === "plugins" && $isAdmin}
+        <div>
+          <div class="mb-4">
+            <p class="section-label mb-1">Extensiones</p>
+            <h2 class="text-lg font-semibold text-radiant-bright">{activeMeta.title}</h2>
+            <p class="mt-1 text-sm text-[var(--color-muted)]">{activeMeta.hint}</p>
+          </div>
+          <PluginManager />
+        </div>
       {:else if activeSection === "actualizaciones"}
         <div data-update-panel="github">
           <Card

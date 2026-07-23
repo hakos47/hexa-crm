@@ -1,5 +1,6 @@
 import postgres from "postgres";
 import { hashPin, verifyCredential } from "../auth/pin";
+import { browserApi } from "./browser-store";
 import {
   clearTempCredentialFields,
   generateTempPassword,
@@ -30,22 +31,47 @@ import type {
   LoginResult,
   Product,
   ProductInput,
+  PluginConfig,
+  PluginKey,
+  PluginTestResult,
+  PluginToolResult,
   ReturnLineInput,
   Sale,
   SaleLineInput,
   Settings,
+  TenantPlugin,
   UserInput,
   VatSummary,
+  WorkCategory,
+  WorkItem,
+  WorkItemFilters,
+  WorkItemInput,
+  WorkMember,
+  WorkProject,
 } from "../types";
 import {
   billingByCompany,
   canAccessCompany,
   companiesForUser,
+  companiesVisibleToUser,
   pickDefaultCompanyId,
   seedCompanies,
   seedCompanyMembers,
 } from "../company/context";
 import { planPartialReturn, remainingLineAmounts } from "../sales/partial-return";
+import {
+  PLUGIN_CATALOG,
+  pluginDefinition,
+  sanitizePluginConfig,
+  stripeToolAccess,
+} from "../plugins/catalog";
+import {
+  callStripeTool,
+  listStripeTools,
+  pluginSecretConfigured,
+  testDatabasePlugin,
+  testStripePlugin,
+} from "../plugins/runtime.server";
 
 // Prefer Vite/SvelteKit private env; fall back to process.env and local Docker defaults.
 function resolveDatabaseUrl(): string {
@@ -58,7 +84,7 @@ function resolveDatabaseUrl(): string {
 
 const DATABASE_URL = resolveDatabaseUrl();
 export const CENTRAL_MODE = typeof process !== "undefined" && process.env?.HEXA_CENTRAL_MODE === "1";
-export const CENTRAL_SCHEMA_VERSION = "0012_semantic_metrics";
+export const CENTRAL_SCHEMA_VERSION = "0014_master_profile";
 
 let sql: postgres.Sql;
 
@@ -352,7 +378,8 @@ export async function initDb() {
       active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
       must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
-      temp_password_issued_at TIMESTAMP WITH TIME ZONE
+      temp_password_issued_at TIMESTAMP WITH TIME ZONE,
+      is_master BOOLEAN NOT NULL DEFAULT FALSE
     );
   `;
 
@@ -364,8 +391,33 @@ export async function initDb() {
     );
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS tenant_plugins (
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_key TEXT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      config JSONB NOT NULL DEFAULT '{}'::jsonb,
+      last_error TEXT,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (company_id, plugin_key)
+    )
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS plugin_audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      plugin_key TEXT NOT NULL,
+      action TEXT NOT NULL,
+      tool_name TEXT,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    )
+  `;
+
   // Multi-empresa columns (idempotent)
   await sql`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS active_company_id INTEGER`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_master BOOLEAN NOT NULL DEFAULT FALSE`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE customers ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS company_id INTEGER NOT NULL DEFAULT 1`;
@@ -374,6 +426,16 @@ export async function initDb() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS publication_status TEXT NOT NULL DEFAULT 'published'`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS condition_code TEXT NOT NULL DEFAULT 'preowned'`;
+  // Perfil de abastecimiento del catálogo. Es deliberadamente por producto en
+  // P0; la relación N:M proveedor-producto y recepciones llegan en la siguiente
+  // fase sin impedir que la tienda sepa hoy de dónde y cómo se sirve cada SKU.
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_name TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_contact TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_email TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_phone TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS fulfillment_mode TEXT NOT NULL DEFAULT 'own_stock'`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_location TEXT NOT NULL DEFAULT 'Almacén principal'`;
+  await sql`CREATE TABLE IF NOT EXISTS suppliers (id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL DEFAULT 1 REFERENCES companies(id) ON DELETE CASCADE, name TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', ordering_method TEXT NOT NULL DEFAULT 'email', notes TEXT NOT NULL DEFAULT '', active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), UNIQUE(company_id, name))`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT NOT NULL DEFAULT ''`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb`;
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_sku_key`;
@@ -404,6 +466,78 @@ export async function initDb() {
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_cents INTEGER NOT NULL DEFAULT 0`;
   await sql`ALTER TABLE sale_lines ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0`;
 
+  // Módulo Trabajo (Multiempresa) DDL
+  await sql`
+    CREATE TABLE IF NOT EXISTS work_categories (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#6b7280',
+      archived_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      CONSTRAINT work_categories_company_normalized_unique UNIQUE (company_id, normalized_name)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS work_projects (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned', 'active', 'paused', 'done', 'archived')),
+      start_date TIMESTAMP WITH TIME ZONE,
+      target_date TIMESTAMP WITH TIME ZONE,
+      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS work_items (
+      id SERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      category_id INTEGER REFERENCES work_categories(id) ON DELETE SET NULL,
+      project_id INTEGER REFERENCES work_projects(id) ON DELETE SET NULL,
+      assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'task' CHECK (type IN ('idea', 'task', 'issue', 'milestone')),
+      status TEXT NOT NULL DEFAULT 'inbox' CHECK (status IN ('inbox', 'planned', 'in_progress', 'blocked', 'done', 'archived')),
+      priority TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+      start_date TIMESTAMP WITH TIME ZONE,
+      due_date TIMESTAMP WITH TIME ZONE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      source_type TEXT,
+      source_key TEXT,
+      source_href TEXT,
+      completed_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_categories_company ON work_categories(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_projects_company ON work_projects(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_items_company ON work_items(company_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_items_category ON work_items(category_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_items_assignee ON work_items(assignee_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_work_items_source ON work_items(company_id, source_type, source_key)`;
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_work_items_active_source
+    ON work_items (company_id, source_type, source_key)
+    WHERE status NOT IN ('done', 'archived') AND source_type IS NOT NULL AND source_key IS NOT NULL
+  `;
+
+  for (const table of ["work_categories", "work_projects", "work_items"] as const) {
+    const policy = `${table}_tenant_isolation`;
+    await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
+    await sql.unsafe(`CREATE POLICY ${policy} ON ${table} USING (company_id = NULLIF(current_setting('app.company_id', true), '')::integer) WITH CHECK (company_id = NULLIF(current_setting('app.company_id', true), '')::integer)`);
+  }
+
   // The local demo keeps its seed data. A central tenant service must start empty
   // and be provisioned explicitly; it must never leak demo rows into a tenant.
   if (!CENTRAL_MODE) {
@@ -413,6 +547,7 @@ export async function initDb() {
     await seedProductsAndCustomers();
   }
   await sql`INSERT INTO schema_migrations (version) VALUES (${CENTRAL_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0015_work_management') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedCompaniesPg() {
@@ -467,7 +602,7 @@ async function loadMembers(): Promise<{ company_id: number; user_id: number; rol
   return await sql`SELECT company_id, user_id, role FROM company_members`;
 }
 
-async function resolveActiveCompanyId(token: string, userId: number): Promise<number> {
+async function resolveActiveCompanyId(token: string | null, userId: number): Promise<number> {
   const companies = await loadCompanies();
   const members = await loadMembers();
   const accessible = companiesForUser(
@@ -475,9 +610,16 @@ async function resolveActiveCompanyId(token: string, userId: number): Promise<nu
     members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
     companies,
   );
-  const sess = await sql`SELECT active_company_id FROM sessions WHERE token = ${token}`;
+  const [sess, masterRows] = await Promise.all([
+    sql`SELECT active_company_id FROM sessions WHERE token = ${token}`,
+    sql`SELECT is_master FROM users WHERE id = ${userId}`,
+  ]);
   const preferred = sess[0]?.active_company_id as number | null | undefined;
-  const id = pickDefaultCompanyId(accessible, preferred);
+  const isMaster = !!masterRows[0]?.is_master;
+  const masterPreferred = isMaster && preferred != null && companies.some((company) => company.id === preferred)
+    ? preferred
+    : null;
+  const id = masterPreferred ?? pickDefaultCompanyId(accessible, preferred) ?? (isMaster ? companies[0]?.id ?? null : null);
   if (id == null) throw new Error("Sin empresa asignada al usuario");
   if (preferred !== id) {
     await sql`UPDATE sessions SET active_company_id = ${id} WHERE token = ${token}`;
@@ -548,7 +690,7 @@ async function seedProductsAndCustomers() {
 async function requireSession(token: string | null): Promise<AuthUser> {
   if (!token) throw new Error("Sesión no iniciada");
   const sessRes = await sql`
-    SELECT s.token, u.id, u.username, u.display_name, u.role, u.active, u.created_at, u.must_change_password, u.temp_password_issued_at
+    SELECT s.token, u.id, u.username, u.display_name, u.role, u.active, u.created_at, u.must_change_password, u.temp_password_issued_at, u.is_master
     FROM sessions s
     JOIN users u ON s.user_id = u.id
     WHERE s.token = ${token} AND u.active = TRUE
@@ -564,6 +706,7 @@ async function requireSession(token: string | null): Promise<AuthUser> {
     created_at: toIso(u.created_at),
     must_change_password: !!u.must_change_password,
     temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+    is_master: !!u.is_master,
   };
 }
 
@@ -571,6 +714,98 @@ async function requireAdmin(token: string | null): Promise<AuthUser> {
   const u = await requireSession(token);
   if (u.role !== "admin") throw new Error("Se requieren permisos de administrador");
   return u;
+}
+
+async function requireAdminCategoryManagementPg(token: string | null): Promise<AuthUser> {
+  const u = await requireSession(token);
+  if (u.role !== "admin" && !u.is_master) {
+    throw new Error("Solo los administradores pueden gestionar categorías.");
+  }
+  return u;
+}
+
+function formatWorkItem(r: any): WorkItem {
+  return {
+    id: r.id,
+    company_id: r.company_id,
+    category_id: r.category_id ?? null,
+    project_id: r.project_id ?? null,
+    assignee_id: r.assignee_id ?? null,
+    created_by: r.created_by,
+    title: r.title,
+    description: r.description ?? "",
+    type: r.type,
+    status: r.status,
+    priority: r.priority,
+    start_date: toIso(r.start_date) || null,
+    due_date: toIso(r.due_date) || null,
+    sort_order: r.sort_order ?? 0,
+    source_type: r.source_type ?? null,
+    source_key: r.source_key ?? null,
+    source_href: r.source_href ?? null,
+    completed_at: toIso(r.completed_at) || null,
+    created_at: toIso(r.created_at),
+    updated_at: toIso(r.updated_at),
+    category: r.category_name
+      ? {
+          id: r.category_id,
+          company_id: r.company_id,
+          name: r.category_name,
+          normalized_name: r.category_normalized_name ?? r.category_name.toUpperCase(),
+          color: r.category_color ?? "#6b7280",
+          archived_at: toIso(r.category_archived_at) || null,
+          created_at: toIso(r.category_created_at) || "",
+          updated_at: toIso(r.category_updated_at) || "",
+        }
+      : null,
+    assignee_name: r.assignee_name ?? null,
+  };
+}
+
+async function tenantPluginRow(companyId: number, key: PluginKey) {
+  const rows = await sql`
+    SELECT enabled, config, last_error, updated_at
+    FROM tenant_plugins
+    WHERE company_id = ${companyId} AND plugin_key = ${key}
+  `;
+  return rows[0] ?? null;
+}
+
+async function tenantPlugin(companyId: number, key: PluginKey): Promise<TenantPlugin> {
+  const definition = pluginDefinition(key);
+  const row = await tenantPluginRow(companyId, key);
+  const config = sanitizePluginConfig(key, row?.config ?? definition.defaultConfig);
+  const enabled = !!row?.enabled;
+  const secretConfigured = pluginSecretConfigured(
+    config,
+    key === "database_bridge" ? "database" : "stripe",
+  );
+  return {
+    plugin_key: key,
+    name: definition.name,
+    description: definition.description,
+    category: definition.category,
+    capabilities: [...definition.capabilities],
+    enabled,
+    config,
+    secret_configured: secretConfigured,
+    status: !enabled ? "inactive" : row?.last_error ? "error" : secretConfigured ? "ready" : "needs_secret",
+    last_error: row?.last_error ?? null,
+    updated_at: row?.updated_at ? toIso(row.updated_at) : null,
+  };
+}
+
+async function pluginAudit(
+  companyId: number,
+  userId: number,
+  key: PluginKey,
+  action: string,
+  toolName?: string,
+) {
+  await sql`
+    INSERT INTO plugin_audit_log (company_id, user_id, plugin_key, action, tool_name)
+    VALUES (${companyId}, ${userId}, ${key}, ${action}, ${toolName ?? null})
+  `;
 }
 
 // -------------------------------------------------------------
@@ -584,7 +819,7 @@ export const postgresApi = {
 
   async login(username: string, password: string): Promise<LoginResult> {
     const userRes = await sql`
-      SELECT id, username, display_name, role, active, pin_hash, must_change_password, temp_password_issued_at, created_at
+      SELECT id, username, display_name, role, active, pin_hash, must_change_password, temp_password_issued_at, created_at, is_master
       FROM users
       WHERE LOWER(username) = ${username.trim().toLowerCase()} AND active = TRUE
     `;
@@ -641,6 +876,7 @@ export const postgresApi = {
         created_at: toIso(user.created_at),
         must_change_password: !!user.must_change_password,
         temp_password_issued_at: toIso(user.temp_password_issued_at) || null,
+        is_master: !!user.is_master,
       },
       token,
       companies: accessible,
@@ -662,14 +898,16 @@ export const postgresApi = {
     }
   },
 
-  async list_companies(token: string | null): Promise<Company[]> {
+  async list_companies(token: string | null, includeAll = false): Promise<Company[]> {
     const user = await requireSession(token);
     const companies = await loadCompanies();
     const members = await loadMembers();
-    return companiesForUser(
+    if (includeAll && !user.is_master) throw new Error("Solo un perfil maestro puede ver todos los tenants");
+    return companiesVisibleToUser(
       user.id,
       members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
       companies,
+      { isMaster: !!user.is_master, includeAll },
     );
   },
 
@@ -690,6 +928,7 @@ export const postgresApi = {
         user.id,
         company_id,
         members as { company_id: number; user_id: number; role: "admin" | "cajero" }[],
+        !!user.is_master,
       )
     ) {
       throw new Error("No tienes acceso a esa empresa");
@@ -717,10 +956,98 @@ export const postgresApi = {
     );
   },
 
+  async list_plugins(token: string | null): Promise<TenantPlugin[]> {
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    return Promise.all(PLUGIN_CATALOG.map((plugin) => tenantPlugin(companyId, plugin.key)));
+  },
+
+  async update_plugin(
+    pluginKey: PluginKey,
+    enabled: boolean,
+    inputConfig: unknown,
+    token: string | null,
+  ): Promise<TenantPlugin> {
+    const user = await requireAdmin(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    pluginDefinition(pluginKey);
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    const config = sanitizePluginConfig(pluginKey, inputConfig);
+    await sql`
+      INSERT INTO tenant_plugins (company_id, plugin_key, enabled, config, last_error, updated_at)
+      VALUES (${companyId}, ${pluginKey}, ${enabled}, ${sql.json(config as any)}, NULL, NOW())
+      ON CONFLICT (company_id, plugin_key) DO UPDATE SET
+        enabled = EXCLUDED.enabled,
+        config = EXCLUDED.config,
+        last_error = NULL,
+        updated_at = NOW()
+    `;
+    await pluginAudit(companyId, user.id, pluginKey, enabled ? "enabled_or_updated" : "disabled");
+    return tenantPlugin(companyId, pluginKey);
+  },
+
+  async test_plugin(pluginKey: PluginKey, token: string | null): Promise<PluginTestResult> {
+    const user = await requireAdmin(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    pluginDefinition(pluginKey);
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    const plugin = await tenantPlugin(companyId, pluginKey);
+    if (!plugin.enabled) throw new Error("Activa y guarda el plugin antes de probarlo");
+    try {
+      const result = pluginKey === "database_bridge"
+        ? await testDatabasePlugin(plugin.config)
+        : await testStripePlugin(plugin.config);
+      await sql`UPDATE tenant_plugins SET last_error = NULL, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
+      await pluginAudit(companyId, user.id, pluginKey, "connection_test_ok");
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo conectar";
+      await sql`UPDATE tenant_plugins SET last_error = ${message.slice(0, 500)}, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
+      await pluginAudit(companyId, user.id, pluginKey, "connection_test_failed");
+      throw new Error(message);
+    }
+  },
+
+  async list_plugin_tools(pluginKey: PluginKey, token: string | null): Promise<any[]> {
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    if (pluginKey !== "stripe_mcp") return [];
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    const plugin = await tenantPlugin(companyId, pluginKey);
+    if (!plugin.enabled || !plugin.secret_configured) return [];
+    const tools = await listStripeTools(plugin.config);
+    return tools.filter((tool) => stripeToolAccess(String(tool?.name ?? ""), plugin.config).allowed);
+  },
+
+  async call_plugin_tool(
+    pluginKey: PluginKey,
+    toolName: string,
+    args: Record<string, unknown>,
+    confirmed: boolean,
+    token: string | null,
+  ): Promise<PluginToolResult> {
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    if (pluginKey !== "stripe_mcp") throw new Error("Este plugin no expone herramientas al asistente");
+    const companyId = await resolveActiveCompanyId(token, user.id);
+    const plugin = await tenantPlugin(companyId, pluginKey);
+    if (!plugin.enabled) throw new Error("El plugin Stripe MCP no está activo para esta tienda");
+    const access = stripeToolAccess(toolName, plugin.config);
+    if (!access.allowed) throw new Error("Herramienta de Stripe no permitida en este tenant");
+    if (access.write) {
+      if (user.role !== "admin") throw new Error("Las operaciones de Stripe requieren un administrador");
+      if (!confirmed) throw new Error("Esta operación necesita confirmación explícita");
+    }
+    const result = await callStripeTool(plugin.config, toolName, args ?? {});
+    await pluginAudit(companyId, user.id, pluginKey, access.write ? "tool_write" : "tool_read", toolName);
+    return result;
+  },
+
   async list_users(token: string | null): Promise<AuthUser[]> {
     await requireAdmin(token);
     const users = await sql`
-      SELECT id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
+      SELECT id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at, is_master
       FROM users
       ORDER BY id ASC
     `;
@@ -733,6 +1060,7 @@ export const postgresApi = {
       created_at: toIso(u.created_at),
       must_change_password: !!u.must_change_password,
       temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+      is_master: !!u.is_master,
     }));
   },
 
@@ -776,7 +1104,7 @@ export const postgresApi = {
         UPDATE users
         SET ${sql(updateData)}
         WHERE id = ${input.id}
-        RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
+        RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at, is_master
       `;
       if (res.length === 0) throw new Error("Usuario no encontrado");
       const u = res[0];
@@ -790,6 +1118,7 @@ export const postgresApi = {
           created_at: toIso(u.created_at),
           must_change_password: !!u.must_change_password,
           temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+          is_master: !!u.is_master,
         },
         temporary_password,
       };
@@ -810,7 +1139,7 @@ export const postgresApi = {
         ${fields.must_change_password},
         ${fields.temp_password_issued_at ? new Date(fields.temp_password_issued_at) : now}
       )
-      RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
+      RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at, is_master
     `;
     const u = res[0];
     return {
@@ -823,6 +1152,7 @@ export const postgresApi = {
         created_at: toIso(u.created_at),
         must_change_password: !!u.must_change_password,
         temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+        is_master: !!u.is_master,
       },
       temporary_password,
     };
@@ -855,7 +1185,7 @@ export const postgresApi = {
       UPDATE users
       SET pin_hash = ${newHash}, must_change_password = FALSE, temp_password_issued_at = NULL
       WHERE id = ${me.id}
-      RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at
+      RETURNING id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at, is_master
     `;
     const u = res[0];
     return {
@@ -867,6 +1197,7 @@ export const postgresApi = {
       created_at: toIso(u.created_at),
       must_change_password: !!u.must_change_password,
       temp_password_issued_at: toIso(u.temp_password_issued_at) || null,
+      is_master: !!u.is_master,
     };
   },
 
@@ -890,6 +1221,13 @@ export const postgresApi = {
       cost_cents: p.cost_cents,
       price_cents: p.price_cents,
       vat_rate: p.vat_rate,
+      supplier_name: p.supplier_name || "",
+      supplier_contact: p.supplier_contact || "",
+      supplier_email: p.supplier_email || "",
+      supplier_phone: p.supplier_phone || "",
+      fulfillment_mode: p.fulfillment_mode || "own_stock",
+      stock_location: p.stock_location || "Almacén principal",
+      condition_code: p.condition_code || "used",
       active: !!p.active,
       created_at: toIso(p.created_at),
       updated_at: toIso(p.updated_at),
@@ -913,6 +1251,13 @@ export const postgresApi = {
           cost_cents = ${input.cost_cents},
           price_cents = ${input.price_cents},
           vat_rate = ${input.vat_rate},
+          supplier_name = ${input.supplier_name ?? ""},
+          supplier_contact = ${input.supplier_contact ?? ""},
+          supplier_email = ${input.supplier_email ?? ""},
+          supplier_phone = ${input.supplier_phone ?? ""},
+          fulfillment_mode = ${input.fulfillment_mode ?? "own_stock"},
+          stock_location = ${input.stock_location ?? "Almacén principal"},
+          condition_code = ${input.condition_code ?? "used"},
           active = ${input.active ?? true},
           updated_at = ${now}
         WHERE id = ${input.id}
@@ -931,6 +1276,13 @@ export const postgresApi = {
         cost_cents: p.cost_cents,
         price_cents: p.price_cents,
         vat_rate: p.vat_rate,
+        supplier_name: p.supplier_name || "",
+        supplier_contact: p.supplier_contact || "",
+        supplier_email: p.supplier_email || "",
+        supplier_phone: p.supplier_phone || "",
+        fulfillment_mode: p.fulfillment_mode || "own_stock",
+        stock_location: p.stock_location || "Almacén principal",
+        condition_code: p.condition_code || "used",
         active: !!p.active,
         created_at: toIso(p.created_at),
         updated_at: toIso(p.updated_at),
@@ -938,7 +1290,7 @@ export const postgresApi = {
     } else {
       // Create
       const res = await sql`
-        INSERT INTO products (sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, active)
+        INSERT INTO products (sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, supplier_name, supplier_contact, supplier_email, supplier_phone, fulfillment_mode, stock_location, condition_code, active)
         VALUES (
           ${input.sku},
           ${input.name},
@@ -949,6 +1301,13 @@ export const postgresApi = {
           ${input.cost_cents},
           ${input.price_cents},
           ${input.vat_rate},
+          ${input.supplier_name ?? ""},
+          ${input.supplier_contact ?? ""},
+          ${input.supplier_email ?? ""},
+          ${input.supplier_phone ?? ""},
+          ${input.fulfillment_mode ?? "own_stock"},
+          ${input.stock_location ?? "Almacén principal"},
+          ${input.condition_code ?? "used"},
           ${input.active ?? true}
         )
         RETURNING *
@@ -974,11 +1333,34 @@ export const postgresApi = {
         cost_cents: p.cost_cents,
         price_cents: p.price_cents,
         vat_rate: p.vat_rate,
+        supplier_name: p.supplier_name || "",
+        supplier_contact: p.supplier_contact || "",
+        supplier_email: p.supplier_email || "",
+        supplier_phone: p.supplier_phone || "",
+        fulfillment_mode: p.fulfillment_mode || "own_stock",
+        stock_location: p.stock_location || "Almacén principal",
+        condition_code: p.condition_code || "used",
         active: !!p.active,
         created_at: toIso(p.created_at),
         updated_at: toIso(p.updated_at),
       };
     }
+  },
+
+  async list_suppliers(token: string | null) {
+    const user = await requireSession(token); if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
+    const rows = await sql`SELECT * FROM suppliers WHERE company_id = ${cid} ORDER BY name ASC`;
+    return rows.map((s) => ({ id: s.id, company_id: s.company_id, name: s.name, contact: s.contact, email: s.email, phone: s.phone, ordering_method: s.ordering_method, notes: s.notes, active: !!s.active, created_at: toIso(s.created_at), updated_at: toIso(s.updated_at) }));
+  },
+
+  async upsert_supplier(input: { id?: number | null; name: string; contact?: string; email?: string; phone?: string; ordering_method?: string; notes?: string; active?: boolean }, token: string | null) {
+    const user = await requireSession(token); if (!token) throw new Error("Sesión no iniciada"); const cid = await resolveActiveCompanyId(token, user.id); const now = new Date();
+    const row = input.id
+      ? (await sql`UPDATE suppliers SET name=${input.name}, contact=${input.contact ?? ""}, email=${input.email ?? ""}, phone=${input.phone ?? ""}, ordering_method=${input.ordering_method ?? "email"}, notes=${input.notes ?? ""}, active=${input.active ?? true}, updated_at=${now} WHERE id=${input.id} AND company_id=${cid} RETURNING *`)[0]
+      : (await sql`INSERT INTO suppliers (company_id,name,contact,email,phone,ordering_method,notes,active) VALUES (${cid},${input.name},${input.contact ?? ""},${input.email ?? ""},${input.phone ?? ""},${input.ordering_method ?? "email"},${input.notes ?? ""},${input.active ?? true}) RETURNING *`)[0];
+    if (!row) throw new Error("Proveedor no encontrado");
+    return { id: row.id, company_id: row.company_id, name: row.name, contact: row.contact, email: row.email, phone: row.phone, ordering_method: row.ordering_method, notes: row.notes, active: !!row.active, created_at: toIso(row.created_at), updated_at: toIso(row.updated_at) };
   },
 
   async adjust_stock(product_id: number, delta: number, reason: string, token: string | null): Promise<Product> {
@@ -1692,13 +2074,13 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
   async reset_demo(token: string | null): Promise<void> {
     await requireAdmin(token);
     // Truncar tablas y volver a sembrar
-    await sql`TRUNCATE TABLE sessions, cash_movements, sale_lines, sales, stock_movements, products, customers RESTART IDENTITY CASCADE`;
+    await sql`TRUNCATE TABLE sessions, work_items, work_projects, work_categories, cash_movements, sale_lines, sales, stock_movements, products, customers RESTART IDENTITY CASCADE`;
     await seedProductsAndCustomers();
   },
 
   async export_backup(token: string | null): Promise<BackupEnvelope> {
     await requireAdmin(token);
-    const [products, customers, sales, sale_lines, cash_movements, stock_movements, settings, users] =
+    const [products, customers, sales, sale_lines, cash_movements, stock_movements, settings, users, work_categories, work_projects, work_items] =
       await Promise.all([
         sql`SELECT * FROM products ORDER BY id`,
         sql`SELECT * FROM customers ORDER BY id`,
@@ -1708,6 +2090,9 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
         sql`SELECT * FROM stock_movements ORDER BY id`,
         sql`SELECT * FROM settings ORDER BY key`,
         sql`SELECT id, username, display_name, role, active, created_at, must_change_password, temp_password_issued_at FROM users ORDER BY id`,
+        sql`SELECT * FROM work_categories ORDER BY id`,
+        sql`SELECT * FROM work_projects ORDER BY id`,
+        sql`SELECT * FROM work_items ORDER BY id`,
       ]);
     const backup = await createBackupEnvelope({
       backend: "postgres",
@@ -1719,6 +2104,9 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
       stock_movements,
       settings,
       users,
+      work_categories,
+      work_projects,
+      work_items,
     });
     await sql`
       INSERT INTO settings (key, value) VALUES ('last_backup_at', ${backup.created_at})
@@ -1748,4 +2136,489 @@ No inventes datos fuera de este contexto. Si falta información, indícalo educa
       "Restauración completa Postgres desde UI desactivada por seguridad. Usa docs/BACKUP.md (pg_dump) o un runbook admin.",
     );
   },
+
+  /* -------------------------------------------------------------
+     Módulo Trabajo (Multiempresa) PostgreSQL Implementation
+     ------------------------------------------------------------- */
+
+  async listWorkItems(filters?: WorkItemFilters, token?: string | null): Promise<WorkItem[]> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    let query = sql`
+      SELECT
+        wi.*,
+        wc.name AS category_name,
+        wc.normalized_name AS category_normalized_name,
+        wc.color AS category_color,
+        wc.archived_at AS category_archived_at,
+        wc.created_at AS category_created_at,
+        wc.updated_at AS category_updated_at,
+        u.display_name AS assignee_name
+      FROM work_items wi
+      LEFT JOIN work_categories wc ON wi.category_id = wc.id
+      LEFT JOIN users u ON wi.assignee_id = u.id
+      WHERE wi.company_id = ${companyId}
+    `;
+
+    if (filters) {
+      if (filters.status) query = sql`${query} AND wi.status = ${filters.status}`;
+      if (filters.type) query = sql`${query} AND wi.type = ${filters.type}`;
+      if (filters.priority) query = sql`${query} AND wi.priority = ${filters.priority}`;
+      if (filters.category_id !== undefined) {
+        if (filters.category_id === null) {
+          query = sql`${query} AND wi.category_id IS NULL`;
+        } else {
+          query = sql`${query} AND wi.category_id = ${filters.category_id}`;
+        }
+      }
+      if (filters.assignee_id !== undefined) {
+        if (filters.assignee_id === null) {
+          query = sql`${query} AND wi.assignee_id IS NULL`;
+        } else {
+          query = sql`${query} AND wi.assignee_id = ${filters.assignee_id}`;
+        }
+      }
+      if (filters.text && filters.text.trim()) {
+        const pattern = `%${filters.text.trim()}%`;
+        query = sql`${query} AND (wi.title ILIKE ${pattern} OR wi.description ILIKE ${pattern})`;
+      }
+    }
+
+    query = sql`${query} ORDER BY wi.sort_order ASC, wi.created_at DESC`;
+    const rows = await query;
+    return rows.map(formatWorkItem);
+  },
+
+  async upsertWorkItem(input: WorkItemInput, token?: string | null): Promise<WorkItem> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const title = (input.title ?? "").trim();
+    if (!title) throw new Error("El título es obligatorio.");
+    const truncatedTitle = title.slice(0, 255);
+
+    if (input.assignee_id != null) {
+      const members = await this.listWorkMembers(token);
+      if (!members.some((m) => m.id === input.assignee_id)) {
+        throw new Error("El responsable no pertenece a esta empresa.");
+      }
+    }
+
+    let categoryId = input.category_id ?? null;
+    if (input.category_name && input.category_name.trim() !== "") {
+      const catName = input.category_name.trim();
+      const normName = catName.toUpperCase();
+      const catRows = await sql`
+        SELECT id FROM work_categories
+        WHERE company_id = ${companyId} AND normalized_name = ${normName}
+        LIMIT 1
+      `;
+      if (catRows.length > 0) {
+        categoryId = catRows[0].id;
+      } else {
+        const newCat = await sql`
+          INSERT INTO work_categories (company_id, name, normalized_name, color)
+          VALUES (${companyId}, ${catName}, ${normName}, '#6b7280')
+          RETURNING id
+        `;
+        categoryId = newCat[0].id;
+      }
+    }
+
+    if (categoryId != null) {
+      const catCheck = await sql`SELECT id FROM work_categories WHERE id = ${categoryId} AND company_id = ${companyId}`;
+      if (catCheck.length === 0) throw new Error("La categoría no pertenece a esta empresa.");
+    }
+
+    if (input.project_id != null) {
+      const projCheck = await sql`SELECT id FROM work_projects WHERE id = ${input.project_id} AND company_id = ${companyId}`;
+      if (projCheck.length === 0) throw new Error("El proyecto no pertenece a esta empresa.");
+    }
+
+    let existing: any = null;
+    if (input.id != null) {
+      const existingRows = await sql`SELECT * FROM work_items WHERE id = ${input.id} AND company_id = ${companyId}`;
+      if (existingRows.length === 0) throw new Error("Tarea no encontrada.");
+      existing = existingRows[0];
+    }
+
+    const targetStatus = input.status ?? existing?.status ?? "inbox";
+    const sourceType = input.source_type !== undefined ? input.source_type : (existing?.source_type ?? null);
+    const sourceKey = input.source_key !== undefined ? input.source_key : (existing?.source_key ?? null);
+    const isActive = targetStatus !== "done" && targetStatus !== "archived";
+
+    if (sourceType && sourceKey && isActive) {
+      const dupQuery = input.id != null
+        ? sql`SELECT id FROM work_items WHERE company_id = ${companyId} AND source_type = ${sourceType} AND source_key = ${sourceKey} AND status NOT IN ('done', 'archived') AND id <> ${input.id} LIMIT 1`
+        : sql`SELECT id FROM work_items WHERE company_id = ${companyId} AND source_type = ${sourceType} AND source_key = ${sourceKey} AND status NOT IN ('done', 'archived') LIMIT 1`;
+      const activeDup = await dupQuery;
+      if (activeDup.length > 0) {
+        throw new Error("Ya existe una tarea activa para este origen.");
+      }
+    }
+
+    let completedAt: Date | null = null;
+    if (targetStatus === "done") {
+      completedAt = existing && existing.status === "done" && existing.completed_at ? existing.completed_at : new Date();
+    } else {
+      completedAt = null;
+    }
+
+    let itemId: number;
+    if (existing) {
+      const updated = await sql`
+        UPDATE work_items SET
+          category_id = ${categoryId},
+          project_id = ${input.project_id !== undefined ? input.project_id : existing.project_id},
+          assignee_id = ${input.assignee_id !== undefined ? input.assignee_id : existing.assignee_id},
+          title = ${truncatedTitle},
+          description = ${input.description !== undefined ? input.description : existing.description},
+          type = ${input.type ?? existing.type},
+          status = ${targetStatus},
+          priority = ${input.priority ?? existing.priority},
+          start_date = ${input.start_date !== undefined ? (input.start_date ?? null) : (existing.start_date ?? null)},
+          due_date = ${input.due_date !== undefined ? (input.due_date ?? null) : (existing.due_date ?? null)},
+          sort_order = ${input.sort_order ?? existing.sort_order ?? 0},
+          source_type = ${sourceType ?? null},
+          source_key = ${sourceKey ?? null},
+          source_href = ${input.source_href !== undefined ? (input.source_href ?? null) : (existing.source_href ?? null)},
+          completed_at = ${completedAt ?? null},
+          updated_at = NOW()
+        WHERE id = ${input.id ?? null} AND company_id = ${companyId}
+        RETURNING id
+      `;
+      itemId = updated[0].id;
+    } else {
+      const inserted = await sql`
+        INSERT INTO work_items (
+          company_id, category_id, project_id, assignee_id, created_by, title, description,
+          type, status, priority, start_date, due_date, sort_order, source_type, source_key,
+          source_href, completed_at
+        ) VALUES (
+          ${companyId}, ${categoryId}, ${input.project_id ?? null}, ${input.assignee_id ?? null},
+          ${user.id}, ${truncatedTitle}, ${input.description ?? ""}, ${input.type ?? "task"},
+          ${targetStatus}, ${input.priority ?? "normal"}, ${input.start_date ?? null}, ${input.due_date ?? null},
+          ${input.sort_order ?? 0}, ${sourceType}, ${sourceKey}, ${input.source_href ?? null}, ${completedAt}
+        )
+        RETURNING id
+      `;
+      itemId = inserted[0].id;
+    }
+
+    const fetched = await sql`
+      SELECT
+        wi.*,
+        wc.name AS category_name,
+        wc.normalized_name AS category_normalized_name,
+        wc.color AS category_color,
+        wc.archived_at AS category_archived_at,
+        wc.created_at AS category_created_at,
+        wc.updated_at AS category_updated_at,
+        u.display_name AS assignee_name
+      FROM work_items wi
+      LEFT JOIN work_categories wc ON wi.category_id = wc.id
+      LEFT JOIN users u ON wi.assignee_id = u.id
+      WHERE wi.id = ${itemId} AND wi.company_id = ${companyId}
+    `;
+    return formatWorkItem(fetched[0]);
+  },
+
+  async archiveWorkItem(id: number, token?: string | null): Promise<WorkItem> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+    const res = await sql`
+      UPDATE work_items
+      SET status = 'archived', completed_at = NULL, updated_at = NOW()
+      WHERE id = ${id} AND company_id = ${companyId}
+      RETURNING id
+    `;
+    if (res.length === 0) throw new Error("Tarea no encontrada.");
+
+    const fetched = await sql`
+      SELECT
+        wi.*,
+        wc.name AS category_name,
+        wc.normalized_name AS category_normalized_name,
+        wc.color AS category_color,
+        wc.archived_at AS category_archived_at,
+        wc.created_at AS category_created_at,
+        wc.updated_at AS category_updated_at,
+        u.display_name AS assignee_name
+      FROM work_items wi
+      LEFT JOIN work_categories wc ON wi.category_id = wc.id
+      LEFT JOIN users u ON wi.assignee_id = u.id
+      WHERE wi.id = ${id} AND wi.company_id = ${companyId}
+    `;
+    return formatWorkItem(fetched[0]);
+  },
+
+  async listWorkCategories(token?: string | null): Promise<WorkCategory[]> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+    const rows = await sql`
+      SELECT * FROM work_categories
+      WHERE company_id = ${companyId} AND archived_at IS NULL
+      ORDER BY name ASC
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      company_id: r.company_id,
+      name: r.name,
+      normalized_name: r.normalized_name,
+      color: r.color,
+      archived_at: toIso(r.archived_at) || null,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    }));
+  },
+
+  async renameWorkCategory(id: number, name: string, token?: string | null): Promise<WorkCategory> {
+    await requireAdminCategoryManagementPg(token ?? null);
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const trimmed = (name ?? "").trim();
+    if (!trimmed) throw new Error("El nombre de la categoría es obligatorio.");
+    const normName = trimmed.toUpperCase();
+
+    const dup = await sql`
+      SELECT id FROM work_categories
+      WHERE company_id = ${companyId} AND normalized_name = ${normName} AND id <> ${id}
+    `;
+    if (dup.length > 0) throw new Error("Ya existe una categoría con ese nombre.");
+
+    const updated = await sql`
+      UPDATE work_categories
+      SET name = ${trimmed}, normalized_name = ${normName}, updated_at = NOW()
+      WHERE id = ${id} AND company_id = ${companyId}
+      RETURNING *
+    `;
+    if (updated.length === 0) throw new Error("Categoría no encontrada.");
+
+    const r = updated[0];
+    return {
+      id: r.id,
+      company_id: r.company_id,
+      name: r.name,
+      normalized_name: r.normalized_name,
+      color: r.color,
+      archived_at: toIso(r.archived_at) || null,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    };
+  },
+
+  async mergeWorkCategory(sourceId: number, targetId: number, token?: string | null): Promise<WorkCategory> {
+    await requireAdminCategoryManagementPg(token ?? null);
+    if (sourceId === targetId) {
+      throw new Error("La categoría de origen y destino no pueden ser la misma.");
+    }
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const check = await sql`
+      SELECT id FROM work_categories
+      WHERE id IN (${sourceId}, ${targetId}) AND company_id = ${companyId}
+    `;
+    if (check.length < 2) throw new Error("Categoría no encontrada.");
+
+    await sql`
+      UPDATE work_items
+      SET category_id = ${targetId}, updated_at = NOW()
+      WHERE company_id = ${companyId} AND category_id = ${sourceId}
+    `;
+    await sql`
+      UPDATE work_categories
+      SET archived_at = NOW(), updated_at = NOW()
+      WHERE id = ${sourceId} AND company_id = ${companyId}
+    `;
+
+    const target = await sql`
+      SELECT * FROM work_categories WHERE id = ${targetId} AND company_id = ${companyId}
+    `;
+    const r = target[0];
+    return {
+      id: r.id,
+      company_id: r.company_id,
+      name: r.name,
+      normalized_name: r.normalized_name,
+      color: r.color,
+      archived_at: toIso(r.archived_at) || null,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    };
+  },
+
+  async archiveWorkCategory(id: number, token?: string | null): Promise<WorkCategory> {
+    await requireAdminCategoryManagementPg(token ?? null);
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const res = await sql`
+      UPDATE work_categories
+      SET archived_at = NOW(), updated_at = NOW()
+      WHERE id = ${id} AND company_id = ${companyId}
+      RETURNING *
+    `;
+    if (res.length === 0) throw new Error("Categoría no encontrada.");
+
+    const r = res[0];
+    return {
+      id: r.id,
+      company_id: r.company_id,
+      name: r.name,
+      normalized_name: r.normalized_name,
+      color: r.color,
+      archived_at: toIso(r.archived_at) || null,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    };
+  },
+
+  async listWorkMembers(token?: string | null): Promise<WorkMember[]> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+    const rows = await sql`
+      SELECT u.id, u.display_name, cm.role
+      FROM company_members cm
+      JOIN users u ON cm.user_id = u.id
+      WHERE cm.company_id = ${companyId} AND u.active = TRUE
+      ORDER BY u.id ASC
+    `;
+    return rows.map((r) => ({
+      id: r.id,
+      display_name: r.display_name,
+      role: r.role,
+    }));
+  },
+
+  async captureDashboardAlert(input: any, token?: string | null): Promise<WorkItem> {
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const alertId = String(input?.alertId || input?.alert_id || input?.id || "");
+    if (!alertId) throw new Error("ID de alerta obligatorio.");
+
+    const existing = await sql`
+      SELECT id FROM work_items
+      WHERE company_id = ${companyId}
+        AND source_type = 'dashboard_alert'
+        AND source_key = ${alertId}
+        AND status NOT IN ('done', 'archived')
+      LIMIT 1
+    `;
+    if (existing.length > 0) {
+      const fetched = await sql`
+        SELECT
+          wi.*,
+          wc.name AS category_name,
+          wc.normalized_name AS category_normalized_name,
+          wc.color AS category_color,
+          wc.archived_at AS category_archived_at,
+          wc.created_at AS category_created_at,
+          wc.updated_at AS category_updated_at,
+          u.display_name AS assignee_name
+        FROM work_items wi
+        LEFT JOIN work_categories wc ON wi.category_id = wc.id
+        LEFT JOIN users u ON wi.assignee_id = u.id
+        WHERE wi.id = ${existing[0].id} AND wi.company_id = ${companyId}
+      `;
+      return formatWorkItem(fetched[0]);
+    }
+
+    let catName = "General";
+    if (alertId === "stock") catName = "Inventario";
+    else if (alertId === "backup") catName = "Administración";
+    else if (alertId === "no-sales" || alertId === "sales-down") catName = "Ventas";
+
+    const title = input?.title || `Alerta: ${alertId}`;
+    const description = input?.detail || input?.description || "";
+    const source_href = input?.href || input?.source_href || null;
+
+    return this.upsertWorkItem(
+      {
+        title,
+        description,
+        type: "task",
+        status: "inbox",
+        priority: "high",
+        category_name: catName,
+        source_type: "dashboard_alert",
+        source_key: alertId,
+        source_href,
+      },
+      token
+    );
+  },
+
+  async upsertWorkCategory(input: { id?: number | null; name: string; color?: string }, token?: string | null): Promise<WorkCategory> {
+    await requireAdminCategoryManagementPg(token ?? null);
+    const user = await requireSession(token ?? null);
+    const companyId = await resolveActiveCompanyId(token ?? null, user.id);
+
+    const trimmed = (input.name ?? "").trim();
+    if (!trimmed) throw new Error("El nombre de la categoría es obligatorio.");
+    const normName = trimmed.toUpperCase();
+
+    if (input.id) {
+      const dup = await sql`
+        SELECT id FROM work_categories
+        WHERE company_id = ${companyId} AND normalized_name = ${normName} AND id <> ${input.id}
+      `;
+      if (dup.length > 0) throw new Error("Ya existe una categoría con ese nombre.");
+
+      const updated = await sql`
+        UPDATE work_categories
+        SET name = ${trimmed}, normalized_name = ${normName}, color = ${input.color || '#3b82f6'}, updated_at = NOW()
+        WHERE id = ${input.id} AND company_id = ${companyId}
+        RETURNING *
+      `;
+      if (updated.length === 0) throw new Error("Categoría no encontrada.");
+      const r = updated[0];
+      return {
+        id: r.id,
+        company_id: r.company_id,
+        name: r.name,
+        normalized_name: r.normalized_name,
+        color: r.color,
+        archived_at: toIso(r.archived_at) || null,
+        created_at: toIso(r.created_at),
+        updated_at: toIso(r.updated_at),
+      };
+    }
+
+    const dup = await sql`
+      SELECT id FROM work_categories
+      WHERE company_id = ${companyId} AND normalized_name = ${normName} AND archived_at IS NULL
+    `;
+    if (dup.length > 0) throw new Error("Ya existe una categoría con ese nombre.");
+
+    const inserted = await sql`
+      INSERT INTO work_categories (company_id, name, normalized_name, color)
+      VALUES (${companyId}, ${trimmed}, ${normName}, ${input.color || '#3b82f6'})
+      RETURNING *
+    `;
+    const r = inserted[0];
+    return {
+      id: r.id,
+      company_id: r.company_id,
+      name: r.name,
+      normalized_name: r.normalized_name,
+      color: r.color,
+      archived_at: toIso(r.archived_at) || null,
+      created_at: toIso(r.created_at),
+      updated_at: toIso(r.updated_at),
+    };
+  },
+
+  list_work_categories(token?: string | null) { return this.listWorkCategories(token); },
+  upsert_work_category(input: any, token?: string | null) { return this.upsertWorkCategory(input, token); },
+  merge_work_categories(sourceId: number, targetId: number, token?: string | null) { return this.mergeWorkCategory(sourceId, targetId, token); },
+  archive_work_category(id: number, token?: string | null) { return this.archiveWorkCategory(id, token); },
+  list_work_members(token?: string | null) { return this.listWorkMembers(token); },
+  list_work_items(filters?: WorkItemFilters, token?: string | null) { return this.listWorkItems(filters, token); },
+  upsert_work_item(input: WorkItemInput, token?: string | null) { return this.upsertWorkItem(input, token); },
+  archive_work_item(id: number, token?: string | null) { return this.archiveWorkItem(id, token); },
+  capture_dashboard_alert(input: any, token?: string | null) { return this.captureDashboardAlert(input, token); },
 };

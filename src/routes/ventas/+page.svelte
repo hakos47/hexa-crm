@@ -355,7 +355,16 @@
   }
 </script>
 
-<div class="mb-4 flex flex-wrap items-center gap-2">
+<section class="sales-page">
+<div class="sales-intro">
+  <p class="workspace-index">03 / VENTAS</p>
+  <div class="sales-intro-row">
+    <div><h2>El mostrador,<br /><em>en calma.</em></h2><p>Cobra con rapidez. Todo lo demás queda en orden.</p></div>
+    <p class="sales-shortcut">F2 <span>buscar</span> · ESC <span>limpiar</span></p>
+  </div>
+</div>
+
+<div class="sales-switcher mb-5 flex flex-wrap items-center gap-2">
   <Button variant={tab === "tpv" ? "primary" : "secondary"} onclick={() => (tab = "tpv")}>
     TPV
   </Button>
@@ -370,8 +379,9 @@
 {#if loading}
   <div class="skeleton h-72"></div>
 {:else if tab === "tpv"}
-  <div class="grid grid-cols-1 gap-4 xl:grid-cols-5">
-    <Card class="min-w-0 xl:col-span-3" lift={false}>
+  <div class="pos-stage grid grid-cols-1 gap-4 xl:grid-cols-5">
+    <Card class="catalogue-stage min-w-0 xl:col-span-3" lift={false}>
+      <div class="pos-stage-heading"><p class="section-label">Catálogo disponible</p><span>{filteredProducts.length} referencias</span></div>
       {#if favoriteProducts.length}
         <div class="mb-3" data-pos-favorites>
           <div class="mb-2 flex items-center justify-between gap-2">
@@ -402,10 +412,10 @@
       <p class="mb-3 text-[11px] text-[var(--color-muted-dim)]">
         F2 = buscar · Esc = limpiar búsqueda · Enter = añadir por SKU exacto o única coincidencia.
       </p>
-      <div class="grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
+      <div class="pos-products grid max-h-[min(28rem,50vh)] gap-2 overflow-y-auto sm:grid-cols-2">
         {#each filteredProducts as p}
           <div
-            class="rounded-xl border border-[var(--color-border)] bg-black/20 p-3 text-left transition hover:border-purple-400/35 hover:bg-purple-500/10"
+            class="pos-product rounded-xl border border-[var(--color-border)] p-3 text-left transition"
           >
             <div class="flex items-start justify-between gap-2">
               <button class="min-h-11 min-w-0 flex-1 text-left" onclick={() => addToCart(p)}>
@@ -432,14 +442,14 @@
       </div>
     </Card>
 
-    <Card class="min-w-0 xl:col-span-2" lift={false}>
-      <h2 class="mb-3 font-semibold">Carrito</h2>
+    <Card class="cart-stage min-w-0 xl:col-span-2" lift={false}>
+      <div class="cart-stage-heading"><div><p class="section-label">Ticket actual</p><h2>Carrito</h2></div><span>{cart.reduce((sum, line) => sum + line.qty, 0)} uds.</span></div>
       {#if cart.length === 0}
         <EmptyState title="Carrito vacío" description="Pulsa un producto para añadirlo." />
       {:else}
-        <ul class="mb-3 max-h-56 space-y-2 overflow-y-auto">
+        <ul class="cart-lines mb-3 max-h-56 space-y-2 overflow-y-auto">
           {#each cart as c, i}
-            <li class="rounded-xl bg-black/20 px-3 py-2 text-sm">
+            <li class="cart-line rounded-xl px-3 py-2 text-sm">
               <div class="flex flex-wrap items-center gap-2">
                 <div class="min-w-0 flex-1 basis-[min(100%,10rem)]">
                   <p class="truncate font-medium">{c.product.name}</p>
@@ -506,7 +516,7 @@
           ]}
         />
 
-        <div class="mb-3 space-y-1 rounded-xl border border-[var(--color-border)] bg-black/30 p-3 text-sm">
+        <div class="cart-totals mb-3 space-y-1 rounded-xl p-3 text-sm">
           {#if totalDiscountCents > 0}
             <div class="flex justify-between gap-2 text-amber-200/90">
               <span>Descuentos (línea + carrito)</span>
@@ -542,8 +552,8 @@
     </Card>
   </div>
 {:else}
-  <div class="grid grid-cols-1 gap-4 xl:grid-cols-5">
-    <Card class="min-w-0 overflow-hidden p-0 xl:col-span-3" lift={false}>
+  <div class="sales-history grid grid-cols-1 gap-4 xl:grid-cols-5">
+    <Card class="sales-list min-w-0 overflow-hidden p-0 xl:col-span-3" lift={false}>
       {#if sales.length === 0}
         <div class="p-4">
           <EmptyState title="Sin ventas" description="Cuando cobres un ticket aparecerá aquí." />
@@ -598,7 +608,7 @@
       {/if}
     </Card>
 
-    <Card class="min-w-0 xl:col-span-2" lift={false}>
+    <Card class="sale-detail min-w-0 xl:col-span-2" lift={false}>
       {#if !selectedSale}
         <p class="text-sm text-[var(--color-muted-dim)]">
           Selecciona un ticket para ver el desglose de IVA.
@@ -710,3 +720,4 @@
     </Card>
   </div>
 {/if}
+</section>
