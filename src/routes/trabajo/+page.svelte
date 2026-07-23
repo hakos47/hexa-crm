@@ -14,6 +14,7 @@
     WorkMember,
     WorkPriority,
     WorkStatus,
+    WorkProject,
   } from "$lib/types";
   import Button from "$lib/components/Button.svelte";
   import Card from "$lib/components/Card.svelte";
@@ -25,11 +26,13 @@
   let items = $state<WorkItem[]>([]);
   let categories = $state<WorkCategory[]>([]);
   let members = $state<WorkMember[]>([]);
+  let projects = $state<WorkProject[]>([]);
   let loading = $state(true);
 
   // Quick Capture State
   let quickTitle = $state("");
   let quickCategoryName = $state("");
+  let quickProjectId = $state("");
   let quickSaving = $state(false);
 
   // Filters State
@@ -38,7 +41,7 @@
   let filterType = $state<string>("");
   let filterPriority = $state<string>("");
   let filterAssignee = $state<string>("");
-  let viewMode = $state<"list" | "kanban">("list");
+  let filterProject = $state<string>("");
 
   // Detail Modal / Drawer State
   let detailModalOpen = $state(false);
@@ -50,6 +53,7 @@
     status: "inbox" as WorkStatus,
     priority: "normal" as WorkPriority,
     category_id: "",
+    project_id: "",
     assignee_id: "",
     start_date: "",
     due_date: "",
@@ -63,6 +67,9 @@
   let mergeModalOpen = $state(false);
   let mergeSourceCategory = $state<WorkCategory | null>(null);
   let mergeTargetCategoryId = $state("");
+
+  // Track active company switch
+  let lastCompanyId = $state<number | null>(null);
 
   // Options for selects
   const statusOptions = [
@@ -129,39 +136,35 @@
     ...categories.map((c) => ({ value: String(c.id), label: c.name })),
   ]);
 
-  const kanbanColumns: { status: WorkStatus; label: string; tone: "neutral" | "ok" | "warn" | "danger" | "ai" }[] = [
-    { status: "inbox", label: "Inbox", tone: "neutral" },
-    { status: "planned", label: "Planificado", tone: "warn" },
-    { status: "in_progress", label: "En progreso", tone: "ai" },
-    { status: "blocked", label: "Bloqueado", tone: "danger" },
-    { status: "done", label: "Hecho", tone: "ok" },
-  ];
+  const projectFilterOptions = $derived([
+    { value: "", label: "Todos los proyectos" },
+    { value: "none", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
 
-  async function moveTaskStatus(item: WorkItem, newStatus: WorkStatus) {
-    try {
-      await api.upsertWorkItem({
-        id: item.id,
-        title: item.title,
-        status: newStatus,
-      });
-      showToast(`Estado cambiado a ${statusLabel(newStatus)}`);
-      await loadData();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Error al cambiar estado", "err");
-    }
-  }
+  const quickProjectOptions = $derived([
+    { value: "", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
+
+  const detailProjectOptions = $derived([
+    { value: "", label: "Sin proyecto" },
+    ...projects.map((p) => ({ value: String(p.id), label: p.name })),
+  ]);
 
   async function loadData() {
     loading = true;
     try {
-      const [cats, mems, workList] = await Promise.all([
+      const [cats, mems, workList, projList] = await Promise.all([
         api.listWorkCategories(),
         api.listWorkMembers(),
         api.listWorkItems(),
+        api.listWorkProjects(),
       ]);
       categories = cats;
       members = mems;
       items = workList;
+      projects = projList;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Error al cargar datos de Trabajo", "err");
     } finally {
@@ -173,9 +176,14 @@
     loadData();
   });
 
-  // Watch URL params for ?item=<id> or ?nuevo=1
+  // Watch URL params for ?project=<id>, ?item=<id> or ?nuevo=1
   $effect(() => {
     const url = $page.url;
+    const projectParam = url.searchParams.get("project");
+    if (projectParam !== null && projectParam !== filterProject) {
+      filterProject = projectParam;
+    }
+
     const nuevoParam = url.searchParams.get("nuevo");
     const itemParam = url.searchParams.get("item");
 
@@ -190,6 +198,32 @@
     }
   });
 
+  // Handle active company switch safety: reset project filter when active company changes
+  $effect(() => {
+    const currentCid = $session.activeCompanyId;
+    if (lastCompanyId !== null && lastCompanyId !== currentCid) {
+      filterProject = "";
+      if ($page.url.searchParams.has("project")) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("project");
+        goto(url.pathname + url.search, { replaceState: true });
+      }
+      loadData();
+    }
+    lastCompanyId = currentCid;
+  });
+
+  function handleProjectFilterChange(val: string) {
+    filterProject = val;
+    const url = new URL(window.location.href);
+    if (val) {
+      url.searchParams.set("project", val);
+    } else {
+      url.searchParams.delete("project");
+    }
+    goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
+  }
+
   async function saveQuickTask() {
     if (!quickTitle.trim()) {
       showToast("Escribe un título para la tarea", "err");
@@ -203,11 +237,12 @@
         type: "task",
         status: "inbox",
         priority: "normal",
-        project_id: null,
+        project_id: quickProjectId ? Number(quickProjectId) : null,
         assignee_id: null,
       });
       quickTitle = "";
       quickCategoryName = "";
+      quickProjectId = "";
       showToast("Tarea guardada correctamente");
       await loadData();
     } catch (err) {
@@ -226,6 +261,7 @@
       status: "inbox",
       priority: "normal",
       category_id: "",
+      project_id: filterProject && filterProject !== "none" ? filterProject : "",
       assignee_id: "",
       start_date: "",
       due_date: "",
@@ -242,6 +278,7 @@
       status: item.status,
       priority: item.priority,
       category_id: item.category_id ? String(item.category_id) : "",
+      project_id: item.project_id ? String(item.project_id) : "",
       assignee_id: item.assignee_id ? String(item.assignee_id) : "",
       start_date: item.start_date ? item.start_date.slice(0, 10) : "",
       due_date: item.due_date ? item.due_date.slice(0, 10) : "",
@@ -253,7 +290,10 @@
     detailModalOpen = false;
     editingItem = null;
     if ($page.url.searchParams.has("item") || $page.url.searchParams.has("nuevo")) {
-      goto("/trabajo", { replaceState: true });
+      const url = new URL(window.location.href);
+      url.searchParams.delete("item");
+      url.searchParams.delete("nuevo");
+      goto(url.pathname + url.search, { replaceState: true });
     }
   }
 
@@ -271,6 +311,7 @@
         status: detailForm.status,
         priority: detailForm.priority,
         category_id: detailForm.category_id ? Number(detailForm.category_id) : null,
+        project_id: detailForm.project_id ? Number(detailForm.project_id) : null,
         assignee_id: detailForm.assignee_id ? Number(detailForm.assignee_id) : null,
         start_date: detailForm.start_date || null,
         due_date: detailForm.due_date || null,
@@ -395,6 +436,13 @@
       if (filterType && item.type !== filterType) return false;
       if (filterPriority && item.priority !== filterPriority) return false;
       if (filterAssignee && String(item.assignee_id || "") !== filterAssignee) return false;
+      if (filterProject) {
+        if (filterProject === "none") {
+          if (item.project_id !== null) return false;
+        } else {
+          if (String(item.project_id || "") !== filterProject) return false;
+        }
+      }
       return true;
     })
   );
@@ -418,6 +466,12 @@
 
     return groups;
   });
+
+  function getProjectName(id?: number | null) {
+    if (!id) return null;
+    const p = projects.find((proj) => proj.id === id);
+    return p ? p.name : null;
+  }
 
   function typeLabel(t: string) {
     switch (t) {
@@ -499,12 +553,12 @@
 </script>
 
 <section class="trabajo-page workspace-page">
-  <!-- Intro Header (Obsidian + radiant purple design system) -->
+  <!-- Intro Header -->
   <div class="workspace-intro workspace-intro-compact mb-6">
     <p class="workspace-index">02 / TRABAJO MULTIEMPRESA</p>
     <div class="workspace-intro-row">
       <h2>Bandeja de trabajo,<br /><em>organizada.</em></h2>
-      <p>Gestión centralizada de tareas, incidencias e hitos clasificados por categoría.</p>
+      <p>Gestión centralizada de tareas, incidencias e hitos clasificados por categoría y proyecto.</p>
     </div>
   </div>
 
@@ -521,9 +575,9 @@
         type="text"
         bind:value={quickTitle}
         placeholder="Escribe el título de la tarea..."
-        class="field flex-1 min-w-[16rem] text-sm"
+        class="field flex-1 min-w-[14rem] text-sm"
       />
-      <div class="relative w-full sm:w-56">
+      <div class="relative w-full sm:w-44">
         <input
           type="text"
           bind:value={quickCategoryName}
@@ -537,6 +591,12 @@
           {/each}
         </datalist>
       </div>
+      <Select
+        options={quickProjectOptions}
+        bind:value={quickProjectId}
+        placeholder="Sin proyecto"
+        class="w-full sm:w-44"
+      />
       <Button variant="primary" type="submit" disabled={quickSaving} class="shrink-0">
         + Guardar tarea
       </Button>
@@ -550,6 +610,13 @@
       bind:value={filterText}
       placeholder="Buscar tarea por título o descripción…"
       class="field w-full max-w-xs text-sm"
+    />
+    <Select
+      options={projectFilterOptions}
+      value={filterProject}
+      onvaluechange={handleProjectFilterChange}
+      placeholder="Todos los proyectos"
+      class="w-48"
     />
     <Select
       options={statusOptions}
@@ -575,25 +642,6 @@
       placeholder="Todos los responsables"
       class="w-48"
     />
-
-    <!-- View Mode Switcher Toggle (Lista / Kanban) -->
-    <div class="flex items-center rounded-xl border border-[var(--color-border-soft)] bg-black/40 p-1">
-      <button
-        type="button"
-        onclick={() => (viewMode = "list")}
-        class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition {viewMode === 'list' ? 'bg-purple-500/20 text-[var(--color-purple-bright)] shadow-sm' : 'text-[var(--color-muted)] hover:text-white'}"
-      >
-        <span class="text-sm">☰</span> Lista
-      </button>
-      <button
-        type="button"
-        onclick={() => (viewMode = "kanban")}
-        class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition {viewMode === 'kanban' ? 'bg-purple-500/20 text-[var(--color-purple-bright)] shadow-sm' : 'text-[var(--color-muted)] hover:text-white'}"
-      >
-        <span class="text-sm">☳</span> Kanban
-      </button>
-    </div>
-
     {#if $isAdmin}
       <Button variant="secondary" onclick={openNewCategoryModal} class="ml-auto text-xs">
         + Nueva categoría
@@ -601,7 +649,7 @@
     {/if}
   </div>
 
-  <!-- Content View (Lista vs Kanban) -->
+  <!-- Content / Grouped List View -->
   {#if loading}
     <div class="py-12 text-center text-sm text-[var(--color-muted-dim)]">
       Cargando bandeja de trabajo...
@@ -613,93 +661,6 @@
     >
       <Button variant="primary" onclick={openNewTaskModal}>+ Nueva tarea</Button>
     </EmptyState>
-  {:else if viewMode === "kanban"}
-    <!-- Kanban Board View -->
-    <div class="grid grid-cols-1 gap-4 overflow-x-auto pb-4 md:grid-cols-5 min-w-[70rem]">
-      {#each kanbanColumns as col}
-        {@const colItems = filteredItems.filter((i) => i.status === col.status)}
-        <div class="flex flex-col rounded-xl border border-[var(--color-border-soft)] bg-black/30 p-3">
-          <!-- Column Header -->
-          <div class="mb-3 flex items-center justify-between border-b border-[var(--color-border-soft)] pb-2.5">
-            <div class="flex items-center gap-2">
-              <span class="font-semibold text-sm text-[var(--color-text)]">{col.label}</span>
-              <Badge tone={col.tone}>{colItems.length}</Badge>
-            </div>
-            <button
-              type="button"
-              onclick={() => {
-                editingItem = null;
-                detailForm = {
-                  title: "",
-                  description: "",
-                  type: "task",
-                  status: col.status,
-                  priority: "normal",
-                  category_id: "",
-                  assignee_id: "",
-                  start_date: "",
-                  due_date: "",
-                };
-                detailModalOpen = true;
-              }}
-              class="text-xs text-[var(--color-muted-dim)] hover:text-[var(--color-purple-bright)] font-bold"
-              title="Añadir a esta columna"
-            >
-              +
-            </button>
-          </div>
-
-          <!-- Column Cards -->
-          {#if colItems.length === 0}
-            <div class="flex flex-1 items-center justify-center py-8 text-center text-xs text-[var(--color-muted-dim)] border border-dashed border-[var(--color-border-soft)] rounded-lg">
-              Sin tareas
-            </div>
-          {:else}
-            <div class="space-y-2.5 flex-1">
-              {#each colItems as item (item.id)}
-                <Card
-                  lift={true}
-                  class="cursor-pointer border border-[var(--color-border-soft)] bg-purple-950/20 p-3 transition hover:border-purple-400/40 hover:shadow-md"
-                  onclick={() => openEditTaskModal(item)}
-                >
-                  <div class="flex items-start justify-between gap-2">
-                    <p class="font-medium text-xs text-[var(--color-text)] hover:text-[var(--color-purple-bright)] line-clamp-2">
-                      {item.title}
-                    </p>
-                    {#if item.category}
-                      <span
-                        class="h-2 w-2 rounded-full shrink-0"
-                        style="background-color: {item.category.color || '#3b82f6'}"
-                        title={item.category.name}
-                      ></span>
-                    {/if}
-                  </div>
-
-                  {#if item.description}
-                    <p class="mt-1 line-clamp-2 text-[11px] text-[var(--color-muted-dim)]">
-                      {item.description}
-                    </p>
-                  {/if}
-
-                  <div class="mt-2.5 flex flex-wrap items-center justify-between gap-1 border-t border-white/5 pt-2 text-[10px]">
-                    <div class="flex items-center gap-1">
-                      <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
-                      <span class="text-[var(--color-muted-dim)]">{typeLabel(item.type)}</span>
-                    </div>
-
-                    {#if item.assignee_name}
-                      <span class="text-[var(--color-muted)] truncate max-w-[80px]" title={item.assignee_name}>
-                        👤 {item.assignee_name}
-                      </span>
-                    {/if}
-                  </div>
-                </Card>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </div>
   {:else}
     <div class="space-y-6">
       {#each groupedCategories() as group}
@@ -763,6 +724,14 @@
                     </div>
 
                     <div class="flex flex-wrap items-center gap-2 shrink-0">
+                      {#if item.project_id}
+                        {@const projName = getProjectName(item.project_id)}
+                        {#if projName}
+                          <span class="inline-flex items-center gap-1 rounded-md bg-purple-500/10 border border-purple-400/20 px-2 py-0.5 text-xs font-medium text-[var(--color-purple-bright)]">
+                            ◫ {projName}
+                          </span>
+                        {/if}
+                      {/if}
                       <Badge tone={statusBadgeTone(item.status)}>{statusLabel(item.status)}</Badge>
                       <Badge tone="neutral">{typeLabel(item.type)}</Badge>
                       <Badge tone={priorityBadgeTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
@@ -854,10 +823,27 @@
 
     <div class="grid gap-3 sm:grid-cols-2">
       <Select
+        label="Proyecto"
+        options={detailProjectOptions}
+        bind:value={detailForm.project_id}
+      />
+      <Select
         label="Responsable"
         options={detailAssigneeOptions}
         bind:value={detailForm.assignee_id}
       />
+    </div>
+
+    <div class="grid gap-3 sm:grid-cols-2">
+      <div class="space-y-1">
+        <label for="task-start-date" class="text-xs font-medium text-[var(--color-muted)]">Fecha de inicio</label>
+        <input
+          id="task-start-date"
+          type="date"
+          bind:value={detailForm.start_date}
+          class="field w-full text-sm"
+        />
+      </div>
       <div class="space-y-1">
         <label for="task-due-date" class="text-xs font-medium text-[var(--color-muted)]">Fecha límite</label>
         <input

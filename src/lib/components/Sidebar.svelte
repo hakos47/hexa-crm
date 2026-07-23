@@ -44,6 +44,7 @@
           label: "PROYECTOS",
           links: [
             { href: "/trabajo", label: "Trabajo", icon: "☑" },
+            { href: "/proyectos", label: "Proyectos", icon: "◫" },
             { href: "/roadmap", label: "Roadmap", icon: "↗" },
           ],
         }]
@@ -98,6 +99,7 @@
   </div>
 
   <div class="flex-1 overflow-y-auto p-3">
+
     <nav class="space-y-0.5" aria-label="Navegación principal">
       {#each navigationGroups as group, groupIndex}
         <section class:mt-4={groupIndex > 0} aria-label={group.label}>
