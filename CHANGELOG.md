@@ -62,6 +62,14 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [0.2.1-rc.2] — 2026-07-24
+
+### Fixed
+- **Aislamiento multiempresa crítico de productos en PostgreSQL/RPC:** Se corrigió un fallo por el cual `upsert_product()` no resolvía la empresa activa (`active_company_id`) de la sesión. Los `INSERT` no incluían `company_id` cayendo en el valor por defecto `1`, y los `UPDATE` filtraban exclusivamente por `id`. Con este fix, la creación, edición y ajuste de stock de productos operan siempre sobre el tenant activo de la sesión del usuario, rechazando modificaciones sobre productos de otros tenants e ignorando cualquier `company_id` recibido en el payload.
+
+
+---
+
 ## [0.2.1-rc.1] - 2026-07-23
 
 ### Added
@@ -123,6 +131,8 @@ Primera release pública (tag `v0.1.0`).
 
 ---
 
-[Unreleased]: https://github.com/HEXA-NIX/hexa-crm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HEXA-NIX/hexa-crm/compare/v0.2.1-rc.2...HEAD
+[0.2.1-rc.2]: https://github.com/HEXA-NIX/hexa-crm/compare/v0.2.1-rc.1...v0.2.1-rc.2
+[0.2.1-rc.1]: https://github.com/HEXA-NIX/hexa-crm/compare/v0.2.0...v0.2.1-rc.1
 [0.2.0]: https://github.com/HEXA-NIX/hexa-crm/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/HEXA-NIX/hexa-crm/releases/tag/v0.1.0

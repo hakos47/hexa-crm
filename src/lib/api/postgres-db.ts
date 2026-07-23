@@ -1635,7 +1635,9 @@ export const postgresApi = {
   },
 
   async upsert_product(input: ProductInput, token: string | null): Promise<Product> {
-    await requireSession(token);
+    const user = await requireSession(token);
+    if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     const now = new Date();
 
     if (input.id) {
@@ -1660,13 +1662,14 @@ export const postgresApi = {
           condition_code = ${input.condition_code ?? "used"},
           active = ${input.active ?? true},
           updated_at = ${now}
-        WHERE id = ${input.id}
+        WHERE id = ${input.id} AND company_id = ${cid}
         RETURNING *
       `;
       if (res.length === 0) throw new Error("Producto no encontrado");
       const p = res[0];
       return {
         id: p.id,
+        company_id: p.company_id,
         sku: p.sku,
         name: p.name,
         description: p.description,
@@ -1690,8 +1693,9 @@ export const postgresApi = {
     } else {
       // Create
       const res = await sql`
-        INSERT INTO products (sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, supplier_name, supplier_contact, supplier_email, supplier_phone, fulfillment_mode, stock_location, condition_code, active)
+        INSERT INTO products (company_id, sku, name, description, category, stock, min_stock, cost_cents, price_cents, vat_rate, supplier_name, supplier_contact, supplier_email, supplier_phone, fulfillment_mode, stock_location, condition_code, active)
         VALUES (
+          ${cid},
           ${input.sku},
           ${input.name},
           ${input.description ?? ""},
@@ -1717,13 +1721,14 @@ export const postgresApi = {
       // Registrar movimiento de stock inicial si es mayor que 0
       if (p.stock > 0) {
         await sql`
-          INSERT INTO stock_movements (product_id, delta, reason)
-          VALUES (${p.id}, ${p.stock}, 'Stock inicial')
+          INSERT INTO stock_movements (product_id, company_id, delta, reason)
+          VALUES (${p.id}, ${cid}, ${p.stock}, 'Stock inicial')
         `;
       }
 
       return {
         id: p.id,
+        company_id: p.company_id,
         sku: p.sku,
         name: p.name,
         description: p.description,
@@ -1764,12 +1769,13 @@ export const postgresApi = {
   },
 
   async adjust_stock(product_id: number, delta: number, reason: string, token: string | null): Promise<Product> {
-    await requireSession(token);
+    const user = await requireSession(token); if (!token) throw new Error("Sesión no iniciada");
+    const cid = await resolveActiveCompanyId(token, user.id);
     const now = new Date();
 
     const updated = await sql.begin(async (tx) => {
       // Leer actual
-      const prodRes = await tx`SELECT stock FROM products WHERE id = ${product_id}`;
+      const prodRes = await tx`SELECT stock FROM products WHERE id = ${product_id} AND company_id = ${cid}`;
       if (prodRes.length === 0) throw new Error("Producto no encontrado");
       const currentStock = prodRes[0].stock;
       const newStock = currentStock + delta;
@@ -1779,14 +1785,14 @@ export const postgresApi = {
       const res = await tx`
         UPDATE products
         SET stock = ${newStock}, updated_at = ${now}
-        WHERE id = ${product_id}
+        WHERE id = ${product_id} AND company_id = ${cid}
         RETURNING *
       `;
 
       // Registrar movimiento
       await tx`
-        INSERT INTO stock_movements (product_id, delta, reason)
-        VALUES (${product_id}, ${delta}, ${reason})
+        INSERT INTO stock_movements (product_id, company_id, delta, reason)
+        VALUES (${product_id}, ${cid}, ${delta}, ${reason})
       `;
 
       return res[0];
@@ -1794,6 +1800,7 @@ export const postgresApi = {
 
     return {
       id: updated.id,
+      company_id: updated.company_id,
       sku: updated.sku,
       name: updated.name,
       description: updated.description,

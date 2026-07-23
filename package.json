@@ -1,6 +1,6 @@
 {
   "name": "hexa-crm",
-  "version": "0.2.1-rc.1",
+  "version": "0.2.1-rc.2",
   "description": "CRM/TPV local-first open source — inventario, ventas, caja, IVA ES e IA con Ollama",
   "type": "module",
   "private": false,
