@@ -29,6 +29,7 @@ import type {
   WorkItemInput,
   WorkMember,
   WorkProject,
+  WorkProjectInput,
 } from "../types";
 import {
   billingByCompany,
@@ -518,6 +519,14 @@ function requireAdminCategoryManagement(s: Store, token?: string | null): AuthUs
   const u = requireSession(s, token);
   if (u.role !== "admin" && !u.is_master) {
     throw new Error("Solo los administradores pueden gestionar categorías.");
+  }
+  return u;
+}
+
+function requireAdminProjectManagement(s: Store, token?: string | null): AuthUser {
+  const u = requireSession(s, token);
+  if (u.role !== "admin" && !u.is_master) {
+    throw new Error("Solo los administradores pueden gestionar proyectos.");
   }
   return u;
 }
@@ -1487,6 +1496,91 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
      Módulo Trabajo (Multiempresa) Browser Implementation
      ------------------------------------------------------------- */
 
+  async listWorkProjects(status_filter?: string, token?: string | null): Promise<WorkProject[]> {
+    const s = load();
+    const companyId = sessionCompanyId(s, token);
+    let projects = s.workProjects.filter((p) => p.company_id === companyId);
+    if (status_filter && status_filter.trim() !== "" && status_filter !== "all") {
+      projects = projects.filter((p) => p.status === status_filter.trim());
+    }
+    return projects.map((p) => ({ ...p }));
+  },
+
+  async getWorkProject(id: number, token?: string | null): Promise<WorkProject> {
+    const s = load();
+    const companyId = sessionCompanyId(s, token);
+    const proj = s.workProjects.find((p) => p.id === id && p.company_id === companyId);
+    if (!proj) throw new Error("Proyecto no encontrado.");
+    return { ...proj };
+  },
+
+  async upsertWorkProject(input: WorkProjectInput, token?: string | null): Promise<WorkProject> {
+    const s = load();
+    const user = requireAdminProjectManagement(s, token);
+    const companyId = sessionCompanyId(s, token);
+
+    const name = (input.name ?? "").trim();
+    if (!name) throw new Error("El nombre del proyecto es obligatorio.");
+
+    let existing: WorkProject | undefined;
+    if (input.id != null) {
+      existing = s.workProjects.find((p) => p.id === input.id && p.company_id === companyId);
+      if (!existing) throw new Error("Proyecto no encontrado.");
+    }
+
+    const startDate = input.start_date !== undefined ? input.start_date : (existing?.start_date ?? null);
+    const targetDate = input.target_date !== undefined ? input.target_date : (existing?.target_date ?? null);
+
+    if (startDate && targetDate) {
+      const startMs = new Date(startDate).getTime();
+      const targetMs = new Date(targetDate).getTime();
+      if (targetMs < startMs) {
+        throw new Error("La fecha de fin no puede ser anterior a la fecha de inicio.");
+      }
+    }
+
+    const nowTs = now();
+    let saved: WorkProject;
+    if (existing) {
+      existing.name = name;
+      if (input.description !== undefined) existing.description = input.description;
+      if (input.status !== undefined) existing.status = input.status;
+      existing.start_date = startDate;
+      existing.target_date = targetDate;
+      existing.updated_at = nowTs;
+      saved = existing;
+    } else {
+      const newId = ++s.seq.workProject;
+      saved = {
+        id: newId,
+        company_id: companyId,
+        name,
+        description: input.description ?? "",
+        status: input.status ?? "planned",
+        start_date: startDate,
+        target_date: targetDate,
+        created_by: user.id,
+        created_at: nowTs,
+        updated_at: nowTs,
+      };
+      s.workProjects.push(saved);
+    }
+    save(s);
+    return { ...saved };
+  },
+
+  async archiveWorkProject(id: number, token?: string | null): Promise<WorkProject> {
+    const s = load();
+    requireAdminProjectManagement(s, token);
+    const companyId = sessionCompanyId(s, token);
+    const proj = s.workProjects.find((p) => p.id === id && p.company_id === companyId);
+    if (!proj) throw new Error("Proyecto no encontrado.");
+    proj.status = "archived";
+    proj.updated_at = now();
+    save(s);
+    return { ...proj };
+  },
+
   async listWorkItems(filters?: WorkItemFilters, token?: string | null): Promise<WorkItem[]> {
     const s = load();
     const companyId = sessionCompanyId(s, token);
@@ -1498,6 +1592,13 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
       if (filters.priority) items = items.filter((i) => i.priority === filters.priority);
       if (filters.category_id !== undefined)
         items = items.filter((i) => i.category_id === filters.category_id);
+      if (filters.project_id !== undefined) {
+        if (filters.project_id === null) {
+          items = items.filter((i) => i.project_id === null);
+        } else if (typeof filters.project_id === "number") {
+          items = items.filter((i) => i.project_id === filters.project_id);
+        }
+      }
       if (filters.assignee_id !== undefined)
         items = items.filter((i) => i.assignee_id === filters.assignee_id);
       if (filters.text && filters.text.trim()) {
@@ -1564,6 +1665,7 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     if (input.project_id != null) {
       const proj = s.workProjects.find((p) => p.id === input.project_id && p.company_id === companyId);
       if (!proj) throw new Error("El proyecto no pertenece a esta empresa.");
+      if (proj.status === "archived") throw new Error("No se pueden crear ni asignar tareas a un proyecto archivado.");
     }
 
     let existingItem: WorkItem | undefined;
@@ -1819,6 +1921,10 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
   },
 
   // Snake-case aliases for RPC dispatch
+  list_work_projects(status_filter?: string, token?: string | null) { return this.listWorkProjects(status_filter, token); },
+  get_work_project(id: number, token?: string | null) { return this.getWorkProject(id, token); },
+  upsert_work_project(input: WorkProjectInput, token?: string | null) { return this.upsertWorkProject(input, token); },
+  archive_work_project(id: number, token?: string | null) { return this.archiveWorkProject(id, token); },
   list_work_categories(token?: string | null) { return this.listWorkCategories(token); },
   upsert_work_category(input: any, token?: string | null) { return this.upsertWorkCategory(input, token); },
   merge_work_categories(args: any, token?: string | null) {

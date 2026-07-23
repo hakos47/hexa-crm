@@ -21,7 +21,12 @@
 
   const links = $derived([
     { href: "/", label: "Pulso", icon: "⌁" },
-    ...(showWork ? [{ href: "/trabajo", label: "Trabajo", icon: "☑" }] : []),
+    ...(showWork
+      ? [
+          { href: "/trabajo", label: "Trabajo", icon: "☑" },
+          { href: "/proyectos", label: "Proyectos", icon: "◫" },
+        ]
+      : []),
     { href: "/inventario", label: "Inventario", icon: "□" },
     { href: "/ventas", label: "Ventas", icon: "○" },
     { href: "/caja", label: "Caja", icon: "€" },
