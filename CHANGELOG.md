@@ -62,6 +62,17 @@ y este proyecto usa [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [0.2.1-rc.1] - 2026-07-23
+
+### Added
+- Integración del agregador Stripe.
+
+### Fixed
+- Arreglo de Plugins en modo local.
+
+
+---
+
 ## [0.2.0] — 2026-07-19
 
 Primera release semántica completa del producto bajo el nombre canónico **hexa-crm**
