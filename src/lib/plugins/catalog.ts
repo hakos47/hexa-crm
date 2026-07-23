@@ -95,6 +95,7 @@ export function redactSensitive(input: string | null | undefined): string {
   redacted = redacted.replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, "postgresql://[REDACTADO]@");
   redacted = redacted.replace(/(?:sk|pk|rk)_(?:live|test)_[a-zA-Z0-9]+/gi, "[SECRET_REDACTADO]");
   redacted = redacted.replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, "Bearer [REDACTADO]");
+  redacted = redacted.replace(/[a-f0-9]{24}:[a-f0-9]{32}:[a-f0-9]+/gi, "[CIPHER_REDACTADO]");
   redacted = redacted.replace(/(?:password|secret|token|api_key|credential|key)=[^&\s,;]+/gi, (match) => {
     const eqIdx = match.indexOf("=");
     return `${match.slice(0, eqIdx)}=[REDACTADO]`;

@@ -17,6 +17,10 @@ import {
   validateBackup,
   type BackupEnvelope,
 } from "../backup/backup";
+import {
+  encryptSecret,
+  decryptSecret,
+} from "../plugins/secret-vault";
 import type {
   AiChatResult,
   AiMessage,
@@ -412,6 +416,7 @@ export async function initDb() {
       PRIMARY KEY (company_id, plugin_key)
     )
   `;
+  await sql`ALTER TABLE tenant_plugins ADD COLUMN IF NOT EXISTS encrypted_secret TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS plugin_audit_log (
       id BIGSERIAL PRIMARY KEY,
@@ -460,8 +465,24 @@ export async function initDb() {
   await sql`ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_id UUID UNIQUE REFERENCES orders(id) ON DELETE SET NULL`;
   await sql`ALTER TABLE products DROP CONSTRAINT IF EXISTS products_publication_status_check`;
   await sql`ALTER TABLE products ADD CONSTRAINT products_publication_status_check CHECK (publication_status IN ('draft', 'published', 'archived'))`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS integration_events (
+      id BIGSERIAL PRIMARY KEY,
+      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      correlation_id TEXT,
+      request_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      tool_name TEXT,
+      summary TEXT,
+      created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS integration_events_tenant_created_idx ON integration_events (company_id, id ASC)`;
+  await sql`CREATE INDEX IF NOT EXISTS integration_events_tenant_corr_idx ON integration_events (company_id, correlation_id)`;
+
   // Defense in depth for central API roles. Requests set app.company_id locally.
-  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log", "plugin_audit_log", "tenant_plugins"] as const) {
+  for (const table of ["products", "customers", "sales", "cash_movements", "reservations", "orders", "external_customer_identities", "semantic_documents", "semantic_metrics", "idempotency_keys", "service_audit_log", "plugin_audit_log", "tenant_plugins", "integration_events"] as const) {
     const policy = `${table}_tenant_isolation`;
     await sql.unsafe(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
     await sql.unsafe(`DROP POLICY IF EXISTS ${policy} ON ${table}`);
@@ -649,6 +670,8 @@ export async function initDb() {
   await sql`INSERT INTO schema_migrations (version) VALUES (${CENTRAL_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`;
   await sql`INSERT INTO schema_migrations (version) VALUES ('0015_work_management') ON CONFLICT (version) DO NOTHING`;
   await sql`INSERT INTO schema_migrations (version) VALUES ('0016_inventory_foundation') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0017_stripe_secret_vault') ON CONFLICT (version) DO NOTHING`;
+  await sql`INSERT INTO schema_migrations (version) VALUES ('0018_integration_events') ON CONFLICT (version) DO NOTHING`;
 }
 
 async function seedInventoryFoundation() {
@@ -950,7 +973,7 @@ function formatWorkItem(r: any): WorkItem {
 
 async function tenantPluginRow(companyId: number, key: PluginKey) {
   const rows = await sql`
-    SELECT enabled, config, last_error, updated_at
+    SELECT enabled, config, encrypted_secret, last_error, updated_at
     FROM tenant_plugins
     WHERE company_id = ${companyId} AND plugin_key = ${key}
   `;
@@ -962,10 +985,9 @@ async function tenantPlugin(companyId: number, key: PluginKey): Promise<TenantPl
   const row = await tenantPluginRow(companyId, key);
   const config = sanitizePluginConfig(key, row?.config ?? definition.defaultConfig);
   const enabled = !!row?.enabled;
-  const secretConfigured = pluginSecretConfigured(
-    config,
-    key === "database_bridge" ? "database" : "stripe",
-  );
+  const secretConfigured = key === "stripe_mcp"
+    ? !!row?.encrypted_secret
+    : pluginSecretConfigured(config, "database");
   const lastLogRows = await sql`
     SELECT created_at FROM plugin_audit_log
     WHERE company_id = ${companyId} AND plugin_key = ${key}
@@ -1169,29 +1191,73 @@ export const postgresApi = {
     enabled: boolean,
     inputConfig: unknown,
     token: string | null,
+    secretAction?: "save" | "replace" | "remove" | "keep",
+    secretInput?: string | null,
   ): Promise<TenantPlugin> {
     const user = await requireAdmin(token);
     if (!token) throw new Error("Sesión no iniciada");
     pluginDefinition(pluginKey);
     const companyId = await resolveActiveCompanyId(token, user.id);
     const config = sanitizePluginConfig(pluginKey, inputConfig);
-    await sql`
-      INSERT INTO tenant_plugins (company_id, plugin_key, enabled, config, last_error, updated_at)
-      VALUES (${companyId}, ${pluginKey}, ${enabled}, ${sql.json(config as any)}, NULL, NOW())
-      ON CONFLICT (company_id, plugin_key) DO UPDATE SET
-        enabled = EXCLUDED.enabled,
-        config = EXCLUDED.config,
-        last_error = NULL,
-        updated_at = NOW()
-    `;
+
+    const rawInput = inputConfig && typeof inputConfig === "object" ? (inputConfig as Record<string, unknown>) : {};
+    const action = secretAction ?? (rawInput.secret_action as "save" | "replace" | "remove" | "keep" | undefined);
+    const rawSecret = secretInput ?? (typeof rawInput.secret === "string" ? rawInput.secret : null);
+
+    let encryptedSecret: string | null | undefined = undefined;
+
+    if (pluginKey === "stripe_mcp" && action) {
+      if (action === "save" || action === "replace") {
+        if (!rawSecret || !rawSecret.trim()) {
+          throw new Error("Debes proporcionar una credencial válida de Stripe");
+        }
+        encryptedSecret = encryptSecret(rawSecret.trim());
+      } else if (action === "remove") {
+        encryptedSecret = null;
+      }
+    }
+
+    if (encryptedSecret !== undefined) {
+      await sql`
+        INSERT INTO tenant_plugins (company_id, plugin_key, enabled, config, encrypted_secret, last_error, updated_at)
+        VALUES (${companyId}, ${pluginKey}, ${enabled}, ${sql.json(config as any)}, ${encryptedSecret}, NULL, NOW())
+        ON CONFLICT (company_id, plugin_key) DO UPDATE SET
+          enabled = EXCLUDED.enabled,
+          config = EXCLUDED.config,
+          encrypted_secret = EXCLUDED.encrypted_secret,
+          last_error = NULL,
+          updated_at = NOW()
+      `;
+    } else {
+      await sql`
+        INSERT INTO tenant_plugins (company_id, plugin_key, enabled, config, last_error, updated_at)
+        VALUES (${companyId}, ${pluginKey}, ${enabled}, ${sql.json(config as any)}, NULL, NOW())
+        ON CONFLICT (company_id, plugin_key) DO UPDATE SET
+          enabled = EXCLUDED.enabled,
+          config = EXCLUDED.config,
+          last_error = NULL,
+          updated_at = NOW()
+      `;
+    }
+
+    const auditSummary = action === "remove"
+      ? "Credencial de Stripe eliminada"
+      : action === "replace"
+        ? "Credencial de Stripe reemplazada"
+        : action === "save"
+          ? "Credencial de Stripe guardada"
+          : enabled
+            ? "Configuración guardada y plugin activado"
+            : "Plugin desactivado";
+
     await pluginAudit(
       companyId,
       user.id,
       pluginKey,
-      enabled ? "enabled_or_updated" : "disabled",
+      action === "remove" ? "secret_removed" : enabled ? "enabled_or_updated" : "disabled",
       null,
       "ok",
-      enabled ? "Configuración guardada y plugin activado" : "Plugin desactivado",
+      auditSummary,
     );
     return tenantPlugin(companyId, pluginKey);
   },
@@ -1214,15 +1280,29 @@ export const postgresApi = {
       );
       throw new Error("Activa y guarda el plugin antes de probarlo");
     }
+
+    let decryptedToken: string | undefined = undefined;
+
+    if (pluginKey === "stripe_mcp") {
+      const row = await tenantPluginRow(companyId, pluginKey);
+      if (!row?.encrypted_secret) {
+        const msg = "Ingresa y guarda la credencial de Stripe antes de probar la conexión";
+        await pluginAudit(companyId, user.id, pluginKey, "connection_test_failed", null, "error", msg);
+        throw new Error(msg);
+      }
+      decryptedToken = decryptSecret(row.encrypted_secret);
+    }
+
     try {
       const result = pluginKey === "database_bridge"
         ? await testDatabasePlugin(plugin.config)
-        : await testStripePlugin(plugin.config);
+        : await testStripePlugin(plugin.config, decryptedToken);
+
       await sql`UPDATE tenant_plugins SET last_error = NULL, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
       await pluginAudit(companyId, user.id, pluginKey, "connection_test_ok", null, "ok", result.message);
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo conectar";
+      const message = redactSensitive(error instanceof Error ? error.message : "No se pudo conectar");
       await sql`UPDATE tenant_plugins SET last_error = ${message.slice(0, 500)}, updated_at = NOW() WHERE company_id = ${companyId} AND plugin_key = ${pluginKey}`;
       await pluginAudit(companyId, user.id, pluginKey, "connection_test_failed", null, "error", message);
       throw new Error(message);
@@ -1236,7 +1316,10 @@ export const postgresApi = {
     const companyId = await resolveActiveCompanyId(token, user.id);
     const plugin = await tenantPlugin(companyId, pluginKey);
     if (!plugin.enabled || !plugin.secret_configured) return [];
-    const tools = await listStripeTools(plugin.config);
+    const row = await tenantPluginRow(companyId, pluginKey);
+    if (!row?.encrypted_secret) return [];
+    const secretToken = decryptSecret(row.encrypted_secret);
+    const tools = await listStripeTools(plugin.config, secretToken);
     return tools.filter((tool) => stripeToolAccess(String(tool?.name ?? ""), plugin.config).allowed);
   },
 
@@ -1303,8 +1386,13 @@ export const postgresApi = {
         throw new Error("Esta operación necesita confirmación explícita");
       }
     }
+    const row = await tenantPluginRow(companyId, pluginKey);
+    if (!row?.encrypted_secret) {
+      throw new Error("No hay credencial de Stripe configurada para esta tienda");
+    }
+    const secretToken = decryptSecret(row.encrypted_secret);
     try {
-      const result = await callStripeTool(plugin.config, toolName, args ?? {});
+      const result = await callStripeTool(plugin.config, toolName, args ?? {}, secretToken);
       await pluginAudit(
         companyId,
         user.id,
@@ -1316,7 +1404,7 @@ export const postgresApi = {
       );
       return result;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = redactSensitive(err instanceof Error ? err.message : String(err));
       await pluginAudit(companyId, user.id, pluginKey, "tool_error", toolName, "error", msg);
       throw err;
     }

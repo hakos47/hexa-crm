@@ -6,11 +6,13 @@
   import Button from "./Button.svelte";
   import Select from "./Select.svelte";
   import { showToast } from "$lib/stores/ui";
+  import { isAdmin } from "$lib/stores/session";
 
   let plugins = $state<TenantPlugin[]>([]);
   let busy = $state<PluginKey | null>(null);
   let testing = $state<PluginKey | null>(null);
   let loading = $state(true);
+  let stripeSecretInput = $state("");
 
   let logsMap = $state<Record<PluginKey, PluginAuditLogEntry[]>>({
     database_bridge: [],
@@ -46,6 +48,8 @@
         return "Configuración activada / guardada";
       case "disabled":
         return "Plugin desactivado";
+      case "secret_removed":
+        return "Credencial eliminada";
       case "connection_test_ok":
       case "test_ok":
         return "Prueba de conexión correcta";
@@ -164,6 +168,39 @@
     }
   }
 
+  async function handleSecretAction(plugin: TenantPlugin, action: "save" | "replace" | "remove") {
+    if (action !== "remove" && !stripeSecretInput.trim()) {
+      showToast("Debes ingresar una credencial válida", "err");
+      return;
+    }
+    busy = plugin.plugin_key;
+    try {
+      const saved = await api.updatePlugin(
+        plugin.plugin_key,
+        plugin.enabled,
+        plugin.config,
+        action,
+        action === "remove" ? undefined : stripeSecretInput.trim(),
+      );
+      stripeSecretInput = "";
+      plugins = plugins.map((item) => (item.plugin_key === saved.plugin_key ? saved : item));
+      const msg =
+        action === "remove"
+          ? "Credencial quitada con éxito"
+          : action === "replace"
+            ? "Credencial reemplazada con éxito"
+            : "Credencial guardada con éxito";
+      showToast(msg);
+      if (logsOpen[plugin.plugin_key]) {
+        await loadLogs(plugin.plugin_key);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "No se pudo actualizar la credencial", "err");
+    } finally {
+      busy = null;
+    }
+  }
+
   async function toggle(plugin: TenantPlugin) {
     await persist(plugin, !plugin.enabled);
   }
@@ -199,8 +236,7 @@
   <div class="rounded-2xl border border-purple-400/20 bg-purple-500/[0.06] px-4 py-3">
     <p class="text-sm font-medium text-[var(--color-purple-bright)]">Plugins por tienda</p>
     <p class="mt-1 text-xs leading-relaxed text-[var(--color-muted)]">
-      La activación y la configuración pertenecen únicamente a la empresa seleccionada. Las credenciales no se
-      ingresan aquí: configura únicamente el nombre de la variable de entorno en el servidor. Nunca se almacenan valores de secretos.
+      La activación y la configuración pertenecen únicamente a la empresa seleccionada. La credencial de Stripe MCP se gestiona desde esta pantalla con cifrado autenticado AES-256-GCM en el servidor. Nunca se revelan ni almacenan secretos en texto plano.
     </p>
   </div>
 
@@ -257,15 +293,17 @@
                   <span class="font-medium text-[var(--color-text)]">{statusLabel(plugin)}</span>
                 </div>
                 <div>
-                  <span class="text-[var(--color-muted-dim)] block text-[10px] uppercase font-semibold">Último chequeo</span>
-                  <span class="font-mono text-[var(--color-muted)]">{formatDate(plugin.last_check || plugin.updated_at)}</span>
+                  <span class="text-[var(--color-muted-dim)] block text-[10px] uppercase font-semibold">Última actualización</span>
+                  <span class="font-mono text-[var(--color-muted)]">{formatDate(plugin.updated_at || plugin.last_check)}</span>
                 </div>
                 <div>
-                  <span class="text-[var(--color-muted-dim)] block text-[10px] uppercase font-semibold">Secreto por referencia</span>
-                  <span class="font-mono text-purple-300 font-semibold">
+                  <span class="text-[var(--color-muted-dim)] block text-[10px] uppercase font-semibold">Bóveda de credenciales</span>
+                  <span class="font-mono font-semibold {plugin.secret_configured ? 'text-emerald-400' : 'text-amber-300'}">
                     {plugin.plugin_key === "database_bridge"
                       ? (plugin.config.database_url_env || "HEXA_PLUGIN_DATABASE_SHOP_URL")
-                      : (plugin.config.credential_env || "HEXA_STRIPE_SHOP_TOKEN")}
+                      : plugin.secret_configured
+                        ? "Bóveda activada (AES-256-GCM)"
+                        : "Sin credencial"}
                   </span>
                 </div>
                 <div>
@@ -289,7 +327,7 @@
               </div>
             </div>
 
-            <!-- Advertencia explícita para Stripe MCP (Requisito 5 & 6) -->
+            <!-- Advertencia explícita para Stripe MCP -->
             {#if plugin.plugin_key === "stripe_mcp"}
               <div class="mt-4 rounded-xl border border-amber-400/20 bg-amber-500/[0.08] p-3 text-xs leading-relaxed text-amber-200/90" data-stripe-policy-notice>
                 <div class="flex items-center gap-1.5 font-semibold text-amber-100 mb-1">
@@ -302,7 +340,7 @@
                 </p>
                 {#if plugin.config.environment === "live"}
                   <p class="mt-2 text-amber-300 font-medium">
-                    💡 En producción (Live), se recomienda utilizar únicamente una variable con clave restringida (<code>rk_live_...</code>) con permisos mínimos auditados.
+                    💡 En producción (Live), se recomienda utilizar únicamente una clave restringida (<code>rk_live_...</code>) con permisos mínimos auditados.
                   </p>
                 {/if}
               </div>
@@ -348,12 +386,68 @@
                         { value: "live", label: "Producción", hint: "Usa una clave restringida" },
                       ]}
                     />
-                    <label class="flex flex-col gap-1.5 text-sm">
-                      <span class="font-medium text-[var(--color-muted)]">Variable con token restringido</span>
-                      <input class="field font-mono text-xs" value={plugin.config.credential_env ?? ""} oninput={(event) => updateConfig(plugin, { credential_env: event.currentTarget.value })} />
-                      <span class="text-[11px] text-[var(--color-muted-dim)]">Nombre de la variable en el entorno (ej: HEXA_STRIPE_SHOP_TOKEN). Nunca ingresar el token directo.</span>
-                    </label>
+                    <div class="flex flex-col justify-end text-xs">
+                      <span class="font-medium text-[var(--color-muted)]">Estado del Secreto</span>
+                      <span class="mt-2 font-mono font-semibold {plugin.secret_configured ? 'text-emerald-400' : 'text-amber-300'}">
+                        {plugin.secret_configured ? "✓ Credencial guardada (Bóveda AES-256-GCM)" : "⚠️ Falta ingresar credencial"}
+                      </span>
+                    </div>
                   </div>
+
+                  <!-- Gestión segura de credencial de Stripe (Requisitos 1, 3 y 7) -->
+                  <div class="mt-3 rounded-xl border border-white/[0.08] bg-black/40 p-3.5 space-y-3" data-stripe-credential-box>
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-semibold text-[var(--color-text)]">Credencial de Stripe MCP</span>
+                      <span class="text-[10px] text-[var(--color-muted-dim)]">Bóveda del servidor</span>
+                    </div>
+
+                    {#if $isAdmin}
+                      <label class="flex flex-col gap-1 text-xs">
+                        <span class="text-[var(--color-muted-dim)] font-medium">
+                          {plugin.secret_configured ? "Nuevo token restringido de Stripe (para reemplazar el actual)" : "Token restringido de Stripe (sk_... o rk_...)"}
+                        </span>
+                        <input
+                          type="password"
+                          class="field font-mono text-xs"
+                          placeholder={plugin.secret_configured ? "••••••••••••••••••••••••" : "rk_test_... o sk_test_..."}
+                          bind:value={stripeSecretInput}
+                          autocomplete="off"
+                        />
+                        <span class="text-[10px] text-[var(--color-muted-dim)]">
+                          El valor se cifra con AES-256-GCM antes de guardarse en base de datos. La UI nunca revelará su contenido.
+                        </span>
+                      </label>
+
+                      <div class="flex flex-wrap gap-2 pt-1">
+                        {#if plugin.secret_configured}
+                          <Button
+                            variant="secondary"
+                            disabled={busy === plugin.plugin_key || !stripeSecretInput.trim()}
+                            onclick={() => handleSecretAction(plugin, "replace")}
+                          >
+                            Reemplazar credencial
+                          </Button>
+                          <Button
+                            variant="danger"
+                            disabled={busy === plugin.plugin_key}
+                            onclick={() => handleSecretAction(plugin, "remove")}
+                          >
+                            Quitar credencial
+                          </Button>
+                        {:else}
+                          <Button
+                            disabled={busy === plugin.plugin_key || !stripeSecretInput.trim()}
+                            onclick={() => handleSecretAction(plugin, "save")}
+                          >
+                            Guardar credencial
+                          </Button>
+                        {/if}
+                      </div>
+                    {:else}
+                      <p class="text-xs text-amber-200/80">Solo los administradores pueden guardar, reemplazar o quitar la credencial.</p>
+                    {/if}
+                  </div>
+
                   <label class="mt-3 flex items-start gap-3 rounded-xl border border-amber-400/15 bg-amber-500/[0.05] px-3 py-3 text-sm">
                     <input type="checkbox" class="mt-0.5 accent-purple-500" checked={plugin.config.allow_write_tools === true} onchange={(event) => updateConfig(plugin, { allow_write_tools: event.currentTarget.checked })} />
                     <span>
@@ -366,7 +460,7 @@
                 {#if plugin.last_error}
                   <p class="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{plugin.last_error}</p>
                 {:else if !plugin.secret_configured}
-                  <p class="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-100/80">Configura el secreto en el entorno del servicio y reinícialo para completar la conexión.</p>
+                  <p class="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.07] px-3 py-2 text-xs text-amber-100/80">Guarda la credencial de Stripe en la bóveda para activar las funciones.</p>
                 {/if}
 
                 <div class="mt-4 flex flex-wrap justify-end gap-2">
@@ -380,7 +474,7 @@
               </div>
             {/if}
 
-            <!-- Panel Plegable de Historial de Actividad (Requisito 2 & 8) -->
+            <!-- Panel Plegable de Historial de Actividad -->
             <div class="mt-5 border-t border-[var(--color-border)] pt-4" data-plugin-audit-panel>
               <button
                 type="button"

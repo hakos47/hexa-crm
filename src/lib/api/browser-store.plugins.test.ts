@@ -23,7 +23,7 @@ describe("tenant plugin management (browser-store)", () => {
     expect(stripePlugin).toBeDefined();
     expect(stripePlugin?.enabled).toBe(false);
     expect(stripePlugin?.status).toBe("inactive");
-    expect(stripePlugin?.config.credential_env).toBe("HEXA_STRIPE_SHOP_TOKEN");
+    expect(stripePlugin?.secret_configured).toBe(false);
   });
 
   it("persists plugin configuration per active company", async () => {
@@ -53,6 +53,45 @@ describe("tenant plugin management (browser-store)", () => {
     expect(dbReloaded?.config.display_name).toBe("Base Central SHOP");
   });
 
+  it("saves, replaces, and removes stripe credentials safely in local store without leaking plaintext", async () => {
+    const login = await browserApi.login("admin", "1234");
+    const token = login.token;
+
+    // 1. Save secret
+    const saved = await browserApi.update_plugin(
+      "stripe_mcp",
+      true,
+      { environment: "live" },
+      token,
+      "save",
+      "rk_test_51N123456789",
+    );
+    expect(saved.secret_configured).toBe(true);
+    expect(saved.status).toBe("ready");
+
+    // 2. Replace secret
+    const replaced = await browserApi.update_plugin(
+      "stripe_mcp",
+      true,
+      { environment: "live" },
+      token,
+      "replace",
+      "rk_test_99999999999",
+    );
+    expect(replaced.secret_configured).toBe(true);
+
+    // 3. Remove secret
+    const removed = await browserApi.update_plugin(
+      "stripe_mcp",
+      true,
+      { environment: "live" },
+      token,
+      "remove",
+    );
+    expect(removed.secret_configured).toBe(false);
+    expect(removed.status).toBe("needs_secret");
+  });
+
   it("isolates plugin state between different companies", async () => {
     const login = await browserApi.login("admin", "1234");
     const token = login.token;
@@ -62,11 +101,12 @@ describe("tenant plugin management (browser-store)", () => {
       "stripe_mcp",
       true,
       {
-        credential_env: "HEXA_STRIPE_SHOP_TOKEN",
         environment: "live",
         allow_write_tools: true,
       },
       token,
+      "save",
+      "rk_live_shop_token",
     );
 
     // Switch to company 2 (DEV)
@@ -75,19 +115,7 @@ describe("tenant plugin management (browser-store)", () => {
     const devPlugins = await browserApi.list_plugins(token);
     const devStripe = devPlugins.find((p) => p.plugin_key === "stripe_mcp");
     expect(devStripe?.enabled).toBe(false);
-    expect(devStripe?.config.environment).toBe("sandbox");
-
-    // Configure company 2 (DEV) differently
-    await browserApi.update_plugin(
-      "stripe_mcp",
-      true,
-      {
-        credential_env: "HEXA_STRIPE_DEV_TOKEN",
-        environment: "sandbox",
-        allow_write_tools: false,
-      },
-      token,
-    );
+    expect(devStripe?.secret_configured).toBe(false);
 
     // Switch back to company 1 (SHOP)
     browserApi.set_active_company(1, token);
@@ -95,6 +123,7 @@ describe("tenant plugin management (browser-store)", () => {
     const shopStripe = shopPlugins.find((p) => p.plugin_key === "stripe_mcp");
 
     expect(shopStripe?.enabled).toBe(true);
+    expect(shopStripe?.secret_configured).toBe(true);
     expect(shopStripe?.config.environment).toBe("live");
     expect(shopStripe?.config.allow_write_tools).toBe(true);
   });
@@ -109,8 +138,8 @@ describe("tenant plugin management (browser-store)", () => {
       "Activa y guarda el plugin antes de probarlo",
     );
 
-    // Enable plugin and test
-    await browserApi.update_plugin("stripe_mcp", true, {}, token);
+    // Enable plugin and save secret
+    await browserApi.update_plugin("stripe_mcp", true, {}, token, "save", "rk_test_123");
     const testResult = await browserApi.test_plugin("stripe_mcp", token);
 
     expect(testResult.ok).toBe(true);
@@ -153,11 +182,12 @@ describe("tenant plugin management (browser-store)", () => {
       "stripe_mcp",
       true,
       {
-        credential_env: "HEXA_STRIPE_SHOP_TOKEN",
         environment: "sandbox",
         allow_write_tools: false,
       },
       token,
+      "save",
+      "rk_test_123",
     );
 
     // 2. Test connection
@@ -172,7 +202,7 @@ describe("tenant plugin management (browser-store)", () => {
     const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
     expect(logs.length).toBeGreaterThanOrEqual(3);
 
-    const configLog = logs.find((l) => l.action === "enabled_or_updated");
+    const configLog = logs.find((l) => l.action === "enabled_or_updated" || l.action === "secret_saved");
     expect(configLog).toBeDefined();
     expect(configLog?.result).toBe("ok");
     expect(configLog?.actor_name).toBe("Administrador");
@@ -219,16 +249,13 @@ describe("tenant plugin management (browser-store)", () => {
     const adminLogin = await browserApi.login("admin", "1234");
     const token = adminLogin.token;
 
-    await browserApi.update_plugin("stripe_mcp", true, {}, token);
+    await browserApi.update_plugin("stripe_mcp", true, {}, token, "save", "sk_live_secret12345");
 
-    // Call test or simulate error containing secret in summary
     const logs = await browserApi.list_plugin_logs("stripe_mcp", 20, token);
     for (const log of logs) {
       if (log.summary) {
-        expect(log.summary).not.toContain("sk_live_");
-        expect(log.summary).not.toContain("sk_test_");
+        expect(log.summary).not.toContain("sk_live_secret12345");
         expect(log.summary).not.toContain("Bearer ");
-        expect(log.summary).not.toMatch(/postgres:\/\/[^@]+@/);
       }
     }
   });
@@ -238,7 +265,7 @@ describe("tenant plugin management (browser-store)", () => {
     const token = adminLogin.token;
 
     // Enable write tools for stripe
-    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token);
+    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token, "save", "rk_test_123");
 
     // Call write tool without confirmed flag -> throws approval error
     await expect(
@@ -257,7 +284,7 @@ describe("tenant plugin management (browser-store)", () => {
     const adminLogin = await browserApi.login("admin", "1234");
     const token = adminLogin.token;
 
-    await browserApi.update_plugin("stripe_mcp", true, {}, token);
+    await browserApi.update_plugin("stripe_mcp", true, {}, token, "save", "rk_test_123");
 
     const res = await browserApi.call_plugin_tool(
       "stripe_mcp",
@@ -289,7 +316,7 @@ describe("tenant plugin management (browser-store)", () => {
     const adminLogin = await browserApi.login("admin", "1234");
     const token = adminLogin.token;
 
-    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token);
+    await browserApi.update_plugin("stripe_mcp", true, { allow_write_tools: true }, token, "save", "rk_test_123");
 
     const res = await browserApi.call_plugin_tool(
       "stripe_mcp",

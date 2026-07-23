@@ -16,7 +16,6 @@ describe("tenant plugin catalog", () => {
 
     const rawInput = {
       mcp_url: "https://attacker.invalid",
-      credential_env: "hexa_stripe_shop_token",
       allow_write_tools: false,
     };
 
@@ -50,12 +49,10 @@ describe("tenant plugin catalog", () => {
   it("keeps Stripe on the official MCP endpoint and forces approval", () => {
     const config = sanitizePluginConfig("stripe_mcp", {
       mcp_url: "https://attacker.invalid",
-      credential_env: "hexa_stripe_shop_token",
       allow_write_tools: true,
       require_approval: false,
     });
     expect(config.mcp_url).toBe(STRIPE_MCP_URL);
-    expect(config.credential_env).toBe("HEXA_STRIPE_SHOP_TOKEN");
     expect(config.require_approval).toBe(true);
     expect(stripeToolAccess("create_refund", config)).toEqual({
       allowed: true,
@@ -81,13 +78,7 @@ describe("tenant plugin catalog", () => {
     expect(config).not.toHaveProperty("password");
   });
 
-  it("rejects unknown plugins and invalid secret references", () => {
+  it("rejects unknown plugins", () => {
     expect(() => pluginDefinition("unknown")).toThrow("Plugin no reconocido");
-    expect(() => sanitizePluginConfig("stripe_mcp", { credential_env: "bad-secret!" })).toThrow(
-      "HEXA_STRIPE_",
-    );
-    expect(() => sanitizePluginConfig("stripe_mcp", { credential_env: "DATABASE_URL" })).toThrow(
-      "HEXA_STRIPE_",
-    );
   });
 });

@@ -73,7 +73,14 @@ export const POST: RequestHandler = async ({ request }) => {
         result = await postgresApi.list_plugins(token);
         break;
       case "update_plugin":
-        result = await postgresApi.update_plugin(args?.plugin_key, !!args?.enabled, args?.config, token);
+        result = await postgresApi.update_plugin(
+          args?.plugin_key,
+          !!args?.enabled,
+          args?.config,
+          token,
+          args?.secret_action as any,
+          args?.secret as any,
+        );
         break;
       case "test_plugin":
         result = await postgresApi.test_plugin(args?.plugin_key, token);

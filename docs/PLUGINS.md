@@ -23,7 +23,7 @@ Para mantener la seguridad y el aislamiento operacional, las responsabilidades s
 
 | Componente | Responsabilidades |
 | :--- | :--- |
-| **CRM Host (`hexa-crm`)** | - Aislamiento multi-tenant por `company_id`.<br>- Control de acceso basado en RBAC.<br>- Resolución de referencias a secretos mediante variables de entorno (`HEXA_*`).<br>- Auditoría inmutable en `plugin_audit_log`.<br>- Exigencia de confirmación humana obligatoria para acciones de escritura o alto privilegio. |
+| **CRM Host (`hexa-crm`)** | - Aislamiento multi-tenant por `company_id`.<br>- Control de acceso basado en RBAC.<br>- Gestión de credenciales de Stripe MCP en la bóveda de secretos con cifrado autenticado en reposo (AES-256-GCM).<br>- Auditoría inmutable en `plugin_audit_log`.<br>- Exigencia de confirmación humana obligatoria para acciones de escritura o alto privilegio. |
 | **Repositorio de Plugin** | - Código fuente desacoplado e implementación de handlers.<br>- Definición de esquemas de herramientas y tipos.<br>- Control de versión e integración propia. |
 | **Agregador (`hexa-crm-plugins.git`)** | - Registro exclusivo de referencias `.gitmodules` y gitlinks.<br>- Sin código de ejecución en el directorio raíz. |
 
@@ -38,18 +38,20 @@ Queda **estrictamente prohibido** cargar o ejecutar código remoto de forma din�
 
 ---
 
-## 4. Gestión de Secretos
+## 4. Gestión de Secretos y Bóveda de Credenciales
 
-El CRM Host guarda únicamente el **nombre de la variable de entorno** referenciada. Nunca persiste contraseñas, API keys, credenciales o tokens OAuth en las tablas del tenant (`tenant_plugins`).
+La gestión de secretos difiere según el plugin:
 
-Ejemplo de configuración en el entorno del servicio:
+1. **Stripe MCP (`stripe_mcp`)**:
+   - Se gestiona **directamente desde la UI (Ajustes > Plugins)** mediante la bóveda de secretos cifrada del backend.
+   - **Cifrado en reposo**: Se utiliza cifrado autenticado **AES-256-GCM** con clave maestra de servidor (`STRIPE_ENCRYPTION_KEY` o `HEXA_MASTER_ENCRYPTION_KEY`). Si falta la clave maestra en el servidor, las operaciones de guardado/descifrado fallan de forma explícita (está estrictamente prohibido el texto plano o fallbacks silenciosos).
+   - **Controles RBAC**: Únicamente los usuarios con rol **Administrador** pueden guardar, reemplazar o quitar la credencial.
+   - **Cero exposición**: Los listados y consultas RPC/UI **nunca devuelven el token ni un enmascarado reversible**, solo el estado seguro (`secret_configured: true/false`) y fecha de actualización.
+   - **Bóveda aislada por tenant**: Las credenciales están estrictamente aisladas por `company_id`.
+   - **Sin persistencia en cliente**: El navegador/local store nunca almacena el secreto real en `localStorage`.
 
-```env
-HEXA_PLUGIN_DATABASE_SHOP_URL=postgresql://usuario:clave@host:5432/tienda
-HEXA_STRIPE_SHOP_TOKEN=rk_test_...
-```
-
-Tras añadir o rotar una referencia a secreto, es necesario reiniciar el servicio y ejecutar **Probar conexión**.
+2. **Base de Datos Externa (`database_bridge`)**:
+   - Guarda únicamente el **nombre de la variable de entorno** referenciada (ej: `HEXA_PLUGIN_DATABASE_SHOP_URL`). Nunca persiste credenciales de base de datos directa en tablas del tenant.
 
 ---
 
@@ -60,21 +62,9 @@ Actualmente, el sistema cuenta con dos plugins principales:
 - **Base de datos externa (`database_bridge`)**: Conexión PostgreSQL independiente por tenant. Se mantiene in-tree (`src/lib/plugins/`). Modo recomendado inicial: `read_only`.
 - **Stripe MCP (`stripe_mcp`)**: Integración con las herramientas de Stripe MCP (`https://mcp.stripe.com`). Extraído e integrado como submódulo externo mediante `vendor/hexa-crm-plugins` -> `plugins/stripe`, ambos pinneados por SHA de commit inmutable. Requiere confirmación humana explícita para operaciones de escritura.
 
-### Inicialización y Actualización de Submódulos
-
-Al clonar el repositorio o actualizar las dependencias de plugins externos, ejecute:
-
-```bash
-git submodule update --init --recursive
-```
-
-### Plan de Transición de Plugins Locales
-> [!NOTE]
-> El plugin `stripe_mcp` ya ha sido extraído al agregador externo en `vendor/hexa-crm-plugins/plugins/stripe` fijado por SHA. La extracción de `database_bridge` hacia su propio repositorio independiente permanece in-tree hasta su posterior fase de migración.
-
 ---
 
 ## 6. Referencias
 
 - Especificación detallada de interfaces, puertas de validación y estructura de submódulos: [PLUGIN_HOST_CONTRACT.md](PLUGIN_HOST_CONTRACT.md).
-- Migración de base de datos para plugins: `0013_tenant_plugins.sql` (tablas `tenant_plugins` y `plugin_audit_log`).
+- Migración de base de datos para plugins: `0013_tenant_plugins.sql` y `0017_stripe_secret_vault`.

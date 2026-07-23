@@ -115,6 +115,7 @@ type StoredTenantPlugin = {
   plugin_key: PluginKey;
   enabled: boolean;
   config: PluginConfig;
+  secret_configured?: boolean;
   last_error?: string | null;
   updated_at?: string | null;
 };
@@ -799,7 +800,7 @@ function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantP
   );
   const config = sanitizePluginConfig(key, stored?.config ?? definition.defaultConfig);
   const enabled = !!stored?.enabled;
-  const secretConfigured = true;
+  const secretConfigured = key === "stripe_mcp" ? !!stored?.secret_configured : true;
   const logs = (s.pluginAuditLogs || []).filter(
     (l) => l.company_id === companyId && l.plugin_key === key,
   );
@@ -815,7 +816,7 @@ function tenantPluginLocal(s: Store, companyId: number, key: PluginKey): TenantP
     enabled,
     config,
     secret_configured: secretConfigured,
-    status: !enabled ? "inactive" : stored?.last_error ? "error" : "ready",
+    status: !enabled ? "inactive" : stored?.last_error ? "error" : secretConfigured ? "ready" : "needs_secret",
     last_error: stored?.last_error ?? null,
     last_check: lastCheck,
     updated_at: stored?.updated_at ?? null,
@@ -2567,39 +2568,73 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
     enabled: boolean,
     inputConfig: unknown,
     token?: string | null,
+    secretAction?: "save" | "replace" | "remove" | "keep",
+    secretInput?: string | null,
   ): Promise<TenantPlugin> {
     const s = load();
     const user = requireAdmin(s, token);
     const companyId = sessionCompanyId(s, token);
     pluginDefinition(pluginKey);
     const config = sanitizePluginConfig(pluginKey, inputConfig);
+
+    const rawInput = inputConfig && typeof inputConfig === "object" ? (inputConfig as Record<string, unknown>) : {};
+    const action = secretAction ?? (rawInput.secret_action as "save" | "replace" | "remove" | "keep" | undefined);
+    const rawSecret = secretInput ?? (typeof rawInput.secret === "string" ? rawInput.secret : null);
+
     if (!s.tenantPlugins) s.tenantPlugins = [];
     const index = s.tenantPlugins.findIndex(
       (p) => p.company_id === companyId && p.plugin_key === pluginKey,
     );
+    const existing = index >= 0 ? s.tenantPlugins[index] : null;
+
+    let secretConfigured = existing?.secret_configured ?? false;
+    if (pluginKey === "stripe_mcp" && action) {
+      if (action === "save" || action === "replace") {
+        if (!rawSecret || !rawSecret.trim()) {
+          throw new Error("Debes proporcionar una credencial válida de Stripe");
+        }
+        secretConfigured = true;
+      } else if (action === "remove") {
+        secretConfigured = false;
+      }
+    }
+
     const updatedRecord: StoredTenantPlugin = {
       company_id: companyId,
       plugin_key: pluginKey,
       enabled,
       config,
+      secret_configured: secretConfigured,
       last_error: null,
       updated_at: now(),
     };
+
     if (index >= 0) {
       s.tenantPlugins[index] = updatedRecord;
     } else {
       s.tenantPlugins.push(updatedRecord);
     }
     save(s);
+
+    const auditSummary = action === "remove"
+      ? "Credencial de Stripe eliminada"
+      : action === "replace"
+        ? "Credencial de Stripe reemplazada"
+        : action === "save"
+          ? "Credencial de Stripe guardada"
+          : enabled
+            ? "Configuración guardada y plugin activado"
+            : "Plugin desactivado";
+
     pluginAuditLocal(
       s,
       companyId,
       user.id,
       pluginKey,
-      enabled ? "enabled_or_updated" : "disabled",
+      action === "remove" ? "secret_removed" : enabled ? "enabled_or_updated" : "disabled",
       null,
       "ok",
-      enabled ? "Configuración guardada y plugin activado" : "Plugin desactivado",
+      auditSummary,
     );
     return tenantPluginLocal(s, companyId, pluginKey);
   },
@@ -2625,6 +2660,21 @@ No inventes datos fuera del contexto. Si falta info, dilo.`;
         "Activa y guarda el plugin antes de probarlo",
       );
       throw new Error("Activa y guarda el plugin antes de probarlo");
+    }
+
+    if (pluginKey === "stripe_mcp" && !plugin.secret_configured) {
+      const msg = "Ingresa y guarda la credencial de Stripe antes de probar la conexión";
+      pluginAuditLocal(
+        s,
+        companyId,
+        user.id,
+        pluginKey,
+        "connection_test_failed",
+        null,
+        "error",
+        msg,
+      );
+      throw new Error(msg);
     }
 
     if (!s.tenantPlugins) s.tenantPlugins = [];

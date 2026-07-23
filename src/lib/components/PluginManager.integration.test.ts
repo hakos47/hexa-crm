@@ -30,12 +30,16 @@ describe("PluginManager client API in local mode", () => {
       activeCompanyId: login.active_company_id,
     });
 
-    const updated = await api.updatePlugin("stripe_mcp", true, {
-      environment: "sandbox",
-      credential_env: "HEXA_STRIPE_SHOP_TOKEN",
-    });
+    const updated = await api.updatePlugin(
+      "stripe_mcp",
+      true,
+      { environment: "sandbox" },
+      "save",
+      "rk_test_123",
+    );
 
     expect(updated.enabled).toBe(true);
+    expect(updated.secret_configured).toBe(true);
 
     const testRes = await api.testPlugin("stripe_mcp");
     expect(testRes.ok).toBe(true);
@@ -49,10 +53,13 @@ describe("PluginManager client API in local mode", () => {
       activeCompanyId: login.active_company_id,
     });
 
-    await api.updatePlugin("stripe_mcp", true, {
-      environment: "sandbox",
-      credential_env: "HEXA_STRIPE_SHOP_TOKEN",
-    });
+    await api.updatePlugin(
+      "stripe_mcp",
+      true,
+      { environment: "sandbox" },
+      "save",
+      "rk_test_123",
+    );
 
     await api.testPlugin("stripe_mcp");
 

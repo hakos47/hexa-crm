@@ -128,7 +128,7 @@ async function callLocal<T>(cmd: string, args: Record<string, any>, token: strin
     case "get_settings": return browserApi.get_settings(token) as T;
     case "update_settings": return browserApi.update_settings(args.partial, token) as T;
     case "list_plugins": return browserApi.list_plugins(token) as Promise<T>;
-    case "update_plugin": return browserApi.update_plugin(args.plugin_key, args.enabled, args.config, token) as Promise<T>;
+    case "update_plugin": return browserApi.update_plugin(args.plugin_key, args.enabled, args.config, token, args.secret_action, args.secret) as Promise<T>;
     case "test_plugin": return browserApi.test_plugin(args.plugin_key, token) as Promise<T>;
     case "list_plugin_tools": return browserApi.list_plugin_tools(args.plugin_key, token) as Promise<T>;
     case "call_plugin_tool": return browserApi.call_plugin_tool(args.plugin_key, args.tool_name, args.arguments, !!args.confirmed, token) as Promise<T>;
@@ -294,8 +294,20 @@ export const api = {
       }[]
     >("billing_by_company"),
   listPlugins: () => call<TenantPlugin[]>("list_plugins"),
-  updatePlugin: (pluginKey: PluginKey, enabled: boolean, config: PluginConfig) =>
-    call<TenantPlugin>("update_plugin", { plugin_key: pluginKey, enabled, config }),
+  updatePlugin: (
+    pluginKey: PluginKey,
+    enabled: boolean,
+    config: PluginConfig,
+    secretAction?: "save" | "replace" | "remove" | "keep",
+    secret?: string,
+  ) =>
+    call<TenantPlugin>("update_plugin", {
+      plugin_key: pluginKey,
+      enabled,
+      config,
+      secret_action: secretAction,
+      secret,
+    }),
   testPlugin: (pluginKey: PluginKey) =>
     call<PluginTestResult>("test_plugin", { plugin_key: pluginKey }),
   listPluginTools: (pluginKey: PluginKey) =>

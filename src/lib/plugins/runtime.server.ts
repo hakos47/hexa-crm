@@ -14,9 +14,13 @@ function secretFromEnv(ref: unknown): string {
   return value;
 }
 
-export function pluginSecretConfigured(config: PluginConfig, kind: "database" | "stripe"): boolean {
+export function pluginSecretConfigured(
+  config: PluginConfig,
+  kind: "database" | "stripe",
+  secretToken?: string,
+): boolean {
   if (kind === "stripe") {
-    return stripePluginSecretConfigured(config as any);
+    return stripePluginSecretConfigured(config as any, secretToken);
   }
   const ref = config.database_url_env;
   return !!(ref && typeof process !== "undefined" && process.env[String(ref)]);
@@ -40,18 +44,19 @@ export async function testDatabasePlugin(config: PluginConfig): Promise<PluginTe
   }
 }
 
-export async function listStripeTools(config: PluginConfig): Promise<any[]> {
-  return vendorListStripeTools(config as any);
+export async function listStripeTools(config: PluginConfig, secretToken?: string): Promise<any[]> {
+  return vendorListStripeTools(config as any, { secretToken });
 }
 
-export async function testStripePlugin(config: PluginConfig): Promise<PluginTestResult> {
-  return vendorTestStripePlugin(config as any);
+export async function testStripePlugin(config: PluginConfig, secretToken?: string): Promise<PluginTestResult> {
+  return vendorTestStripePlugin(config as any, { secretToken });
 }
 
 export async function callStripeTool(
   config: PluginConfig,
   name: string,
   args: Record<string, unknown>,
+  secretToken?: string,
 ): Promise<PluginToolResult> {
-  return vendorCallStripeTool(config as any, name, args) as Promise<PluginToolResult>;
+  return vendorCallStripeTool(config as any, name, args, { secretToken }) as Promise<PluginToolResult>;
 }
